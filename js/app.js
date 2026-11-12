@@ -107,6 +107,9 @@ Store.init().then(function () {
     modalCloseable = closeable !== false;
     $('toast').hidden = true;
     modal.hidden = false;
+    // 検索欄などに入力カーソルが残っていると、はかり・キーボードの入力がそちらに入ってしまうので外す
+    var ae = document.activeElement;
+    if (ae && ae !== document.body && !modal.contains(ae) && ae.blur) ae.blur();
   }
   function runModalCleanup() {
     if (modalHooks.cleanup) { try { modalHooks.cleanup(); } catch (e) { /* noop */ } }
@@ -200,7 +203,7 @@ Store.init().then(function () {
   $('prodSearch').addEventListener('search', function () { searchQ = this.value.trim(); renderGrid(); });
   $('prodSearch').addEventListener('keydown', function (e) {
     // Enter：1件だけ見つかったらそのままレジに入れる（商品コードの読み取りにも使える）
-    if (e.key !== 'Enter') return;
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return; // 日本語の変換確定の Enter は除く
     e.preventDefault();
     var hits = products.filter(function (p) { return Calc.matchProduct(p, searchQ); });
     var exact = products.filter(function (p) { return p.code && p.code === searchQ; });
@@ -417,15 +420,8 @@ Store.init().then(function () {
       var b = e.target.closest('button');
       if (!b) return;
       if (b.dataset.act === 'cancel') { closeModal(); return; }
-      if (b.dataset.act === 'hold') {
-        holdCurrent($('holdMemo').value.trim());
-        saveCart();
-        closeModal();
-        $('cartPanel').classList.remove('open');
-        toast('保留しました。次のお客様の会計に進めます');
-        return;
-      }
-      if (b.dataset.recall) {
+      if (b.dataset.act === 'hold') doHold();
+      else if (b.dataset.recall) {
         if (has) holdCurrent($('holdMemo').value.trim());
         recallHold(b.dataset.recall);
         saveCart();
@@ -443,6 +439,16 @@ Store.init().then(function () {
         if (!cart.lines.length && !Store.getHolds().length) closeModal(); else openHoldModal();
       }
     });
+    function doHold() {
+      holdCurrent($('holdMemo').value.trim());
+      saveCart();
+      closeModal();
+      $('cartPanel').classList.remove('open');
+      toast('保留しました。次のお客様の会計に進めます');
+    }
+    if (has) {
+      $('holdMemo').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); doHold(); } });
+    }
   }
 
   // ---------- 重量入力（グラム売り・はかり対応） ----------

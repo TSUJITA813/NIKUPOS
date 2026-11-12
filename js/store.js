@@ -162,12 +162,48 @@
       var rq = db.transaction(self.name, 'readonly').objectStore(self.name).getAll();
       rq.onsuccess = function () {
         self.items = rq.result || [];
-        self.items.sort(byId);
         self.items.forEach(function (it) { self.snap[it.id] = JSON.stringify(it); });
+        self.replayWal();
+        self.items.sort(byId);
         resolve();
       };
       rq.onerror = function () { reject(rq.error); };
     });
+  };
+  // ---- 書き込みの控え（アプリを閉じた直後でもデータを失わないため） ----
+  // IndexedDB への保存は少し遅れて終わるので、その間にアプリが閉じられると消えてしまう。
+  // 先に localStorage（すぐに保存される）へ控えを書き、保存が終わったら消す。次に開いたとき残っていれば反映する。
+  var WAL_MAX = 200; // 一度にこれより多い保存（復元など）は控えを取らない
+  Collection.prototype.walKey = function () { return 'nikupos.wal.' + this.name; };
+  Collection.prototype.readWal = function () {
+    try { return JSON.parse(localStorage.getItem(this.walKey()) || 'null') || { p: {}, d: {} }; } catch (e) { return { p: {}, d: {} }; }
+  };
+  Collection.prototype.writeWal = function (w) {
+    try {
+      if (!Object.keys(w.p).length && !Object.keys(w.d).length) localStorage.removeItem(this.walKey());
+      else localStorage.setItem(this.walKey(), JSON.stringify(w));
+      return true;
+    } catch (e) { return false; }
+  };
+  /** 前回、保存が終わる前に閉じられた分を反映する */
+  Collection.prototype.replayWal = function () {
+    var self = this;
+    var w = self.readWal();
+    var puts = [], dels = [];
+    Object.keys(w.p).forEach(function (id) {
+      var obj;
+      try { obj = JSON.parse(w.p[id]); } catch (e) { return; }
+      var i = self.items.findIndex(function (x) { return x.id === id; });
+      if (i >= 0) self.items[i] = obj; else self.items.push(obj);
+      self.snap[id] = w.p[id];
+      puts.push(obj);
+    });
+    Object.keys(w.d).forEach(function (id) {
+      self.items = self.items.filter(function (x) { return x.id !== id; });
+      delete self.snap[id];
+      dels.push(id);
+    });
+    if (puts.length || dels.length) self.persist(puts, dels);
   };
   Collection.prototype.persist = function (puts, dels) {
     var self = this;
@@ -176,13 +212,28 @@
       return Promise.resolve();
     }
     if (!puts.length && !dels.length) return Promise.resolve();
+    var useWal = puts.length + dels.length <= WAL_MAX;
+    var written = {};
+    if (useWal) {
+      var w = self.readWal();
+      puts.forEach(function (p) { written[p.id] = w.p[p.id] = JSON.stringify(p); delete w.d[p.id]; });
+      dels.forEach(function (id) { w.d[id] = 1; delete w.p[id]; });
+      self.writeWal(w);
+    }
+    function clearWal() {
+      if (!useWal) return;
+      var w2 = self.readWal();
+      puts.forEach(function (p) { if (w2.p[p.id] === written[p.id]) delete w2.p[p.id]; });
+      dels.forEach(function (id) { delete w2.d[id]; });
+      self.writeWal(w2);
+    }
     return new Promise(function (resolve) {
       try {
         var tx = db.transaction(self.name, 'readwrite');
         var os = tx.objectStore(self.name);
         puts.forEach(function (p) { os.put(p); });
         dels.forEach(function (id) { os.delete(id); });
-        tx.oncomplete = function () { resolve(true); };
+        tx.oncomplete = function () { clearWal(); resolve(true); };
         tx.onerror = tx.onabort = function () { warn(); resolve(false); };
       } catch (e) {
         warn();
@@ -255,7 +306,11 @@
     self.items.forEach(function (it) { self.snap[it.id] = JSON.stringify(it); });
     version++;
     if (!db) return self.persist([], []);
-    return self.persist([], dels).then(function () { return self.persist(self.items, []); });
+    // 古い控えが復元後のデータを上書きしないよう消し、削除と書き込みを1回の保存（途中で閉じても半端にならない）で行う
+    try { localStorage.removeItem(self.walKey()); } catch (e) { /* noop */ }
+    var keep = {};
+    self.items.forEach(function (it) { keep[it.id] = true; });
+    return self.persist(self.items, dels.filter(function (id) { return !keep[id]; }));
   };
   /**
    * 別の端末からの変更を反映（新しい方を採用）

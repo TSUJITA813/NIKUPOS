@@ -62,12 +62,13 @@
       Object.keys(s.rates).forEach(function (r) { rates[r] = true; });
       return { date: date, s: s };
     });
-    var total = { count: 0, total: 0, cash: 0, cashless: 0, cashlessBy: {}, depositUsed: 0, returnsCount: 0, returns: 0, discount: 0, voids: 0, rates: {}, wholesale: 0, cashIn: 0, cashOut: 0 };
+    var total = { count: 0, total: 0, cash: 0, cashless: 0, cashlessBy: {}, depositUsed: 0, depositInCash: 0, depositInCashless: 0, depositRefund: 0, returnsCount: 0, returns: 0, discount: 0, voids: 0, rates: {}, wholesale: 0, cashIn: 0, cashOut: 0 };
     var items = {};
     days.forEach(function (d) {
       var s = d.s;
       total.count += s.count; total.total += s.total; total.cash += s.cash; total.cashless += s.cashless;
-      total.depositUsed += s.depositUsed; total.returnsCount += s.returns.count; total.returns += s.returns.amount;
+      total.depositUsed += s.depositUsed; total.depositInCash += s.depositIn.cash; total.depositInCashless += s.depositIn.cashless;
+      total.depositRefund += s.depositRefund.cash + s.depositRefund.cashless; total.returnsCount += s.returns.count; total.returns += s.returns.amount;
       total.discount += s.discount; total.voids += s.voids; total.wholesale += s.wholesale.total;
       total.cashIn += s.cashIn; total.cashOut += s.cashOut;
       Object.keys(s.cashlessBy).forEach(function (k) { total.cashlessBy[k] = (total.cashlessBy[k] || 0) + s.cashlessBy[k]; });
@@ -95,7 +96,7 @@
   function dayRow(label, wd, s, sum) {
     var r = [label, wd, s.count, s.total, s.count ? Math.round(s.total / s.count) : 0, s.cash, s.cashless];
     sum.cashlessTypes.forEach(function (k) { r.push(s.cashlessBy[k] || 0); });
-    r.push(s.depositUsed, s.returnsCount, s.returns, s.discount, s.voids);
+    r.push(s.depositUsed, s.depositInCash, s.depositInCashless, s.depositRefund, s.returnsCount, s.returns, s.discount, s.voids);
     sum.rates.forEach(function (rate) { var x = s.rates[rate] || { amount: 0, tax: 0 }; r.push(x.amount, x.tax); });
     r.push(s.wholesale, s.cashIn, s.cashOut);
     return r;
@@ -103,7 +104,7 @@
   function dayHeader(sum) {
     var h = ['日付', '曜日', '客数', '売上（税込）', '客単価', '現金', 'キャッシュレス'];
     sum.cashlessTypes.forEach(function (k) { h.push('　' + k); });
-    h.push('前受金から充当', '返品件数', '返品額', '値引き', '取消件数');
+    h.push('前受金から充当', '前受金の受取（現金）', '前受金の受取（キャッシュレス）', '前受金の返金', '返品件数', '返品額', '値引き', '取消件数');
     sum.rates.forEach(function (rate) { h.push(rate + '%対象', rate + '%消費税'); });
     h.push('卸の納品（税込）', '入金', '出金');
     return h;
@@ -111,6 +112,7 @@
   function flat(s) {
     return {
       count: s.count, total: s.total, cash: s.cash, cashless: s.cashless, cashlessBy: s.cashlessBy, depositUsed: s.depositUsed,
+      depositInCash: s.depositIn.cash, depositInCashless: s.depositIn.cashless, depositRefund: s.depositRefund.cash + s.depositRefund.cashless,
       returnsCount: s.returns.count, returns: s.returns.amount, discount: s.discount, voids: s.voids, rates: s.rates,
       wholesale: s.wholesale.total, cashIn: s.cashIn, cashOut: s.cashOut
     };
@@ -129,9 +131,9 @@
     var months = {}, order = [];
     sum.days.forEach(function (d) {
       var m = d.date.slice(0, 7);
-      if (!months[m]) { order.push(m); months[m] = { count: 0, total: 0, cash: 0, cashless: 0, cashlessBy: {}, depositUsed: 0, returnsCount: 0, returns: 0, discount: 0, voids: 0, rates: {}, wholesale: 0, cashIn: 0, cashOut: 0 }; }
+      if (!months[m]) { order.push(m); months[m] = { count: 0, total: 0, cash: 0, cashless: 0, cashlessBy: {}, depositUsed: 0, depositInCash: 0, depositInCashless: 0, depositRefund: 0, returnsCount: 0, returns: 0, discount: 0, voids: 0, rates: {}, wholesale: 0, cashIn: 0, cashOut: 0 }; }
       var t = months[m], s = flat(d.s);
-      ['count', 'total', 'cash', 'cashless', 'depositUsed', 'returnsCount', 'returns', 'discount', 'voids', 'wholesale', 'cashIn', 'cashOut'].forEach(function (k) { t[k] += s[k]; });
+      ['count', 'total', 'cash', 'cashless', 'depositUsed', 'depositInCash', 'depositInCashless', 'depositRefund', 'returnsCount', 'returns', 'discount', 'voids', 'wholesale', 'cashIn', 'cashOut'].forEach(function (k) { t[k] += s[k]; });
       Object.keys(s.cashlessBy).forEach(function (k) { t.cashlessBy[k] = (t.cashlessBy[k] || 0) + s.cashlessBy[k]; });
       Object.keys(s.rates).forEach(function (r) {
         var x = t.rates[r] || (t.rates[r] = { amount: 0, tax: 0 });
@@ -187,7 +189,11 @@
 
   function toCsv(rows) {
     return '﻿' + rows.map(function (r) {
-      return r.map(function (c) { var v = c == null ? '' : String(c); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',');
+      return r.map(function (c) {
+        var v = c == null ? '' : String(c);
+        // 表計算ソフトが数式として実行しないように（= + @ で始まる文字）
+        if (typeof c === 'string' && /^[=+@\t\r]/.test(v)) v = "'" + v;
+        return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',');
     }).join('\r\n');
   }
 

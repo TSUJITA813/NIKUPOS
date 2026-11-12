@@ -144,7 +144,10 @@
     var done = Store.getClosings().filter(function (c) { return c.date === closeDate && (c.dev || '') === dev(); });
     var last = done[done.length - 1];
     var w = s.wholesale;
+    var holds = Store.getHolds ? Store.getHolds().length : 0;
     var h = '<div class="toolbar"><input type="date" id="clDate" value="' + closeDate + '"><span class="note">' + devLabel(dev()) + 'のレジ</span></div>' +
+      (holds ? '<div class="list-item" style="border-left:6px solid var(--danger)"><b>保留中の会計が ' + holds + '件 あります。</b>' +
+        'まだ売上に入っていません。レジの「保留」から呼び出して会計するか、削除してから精算してください。</div>' : '') +
       (last ? '<div class="list-item" style="border-left:6px solid var(--ok)"><b>精算済み</b>（' + POS.timeStr(new Date(last.at)) + '・' + esc(last.staff || '') +
         '）実際の現金 ' + yen(last.counted) + '・過不足 ' + signed(last.diff) + '</div>' : '') +
       '<div class="cards">' +

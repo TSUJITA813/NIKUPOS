@@ -87,3 +87,19 @@ test('商品の検索：ひらがな・カタカナ・全角半角・コード',
   assert.ok(Calc.matchProduct({ name: 'もも肉' }, 'ももにく'));
   assert.ok(!Calc.matchProduct({ name: 'むね肉' }, 'もも'));
 });
+
+test('日別：前受金の受取・返金の列、CSV の数式対策', () => {
+  const d = { sales: [], reservations: [
+    { id: 'R1', deposit: 1000, depositMethod: 'cash', depositDate: '2026-11-02' },
+    { id: 'R2', deposit: 500, depositMethod: 'cashless', depositDate: '2026-11-02', depositRefundDate: '2026-11-03' }
+  ] };
+  const s = R.summarize(d, '2026-11-01', '2026-11-30');
+  const rows = R.dailyRows(s);
+  const h = rows[0];
+  const last = rows[rows.length - 1];
+  assert.strictEqual(last[h.indexOf('前受金の受取（現金）')], 1000);
+  assert.strictEqual(last[h.indexOf('前受金の受取（キャッシュレス）')], 500);
+  assert.strictEqual(last[h.indexOf('前受金の返金')], 500);
+  assert.strictEqual(R.monthlyRows(s)[1][R.monthlyRows(s)[0].indexOf('前受金の受取（現金）')], 1000);
+  assert.strictEqual(R.toCsv([['=1+1', '@x', 'もも', -5, '-3']]), "﻿'=1+1,'@x,もも,-5,-3");
+});
