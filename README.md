@@ -50,6 +50,10 @@
 
 ### 公開方法（例：GitHub Pages）
 
+このリポジトリの場合の公開先：**https://tsujita813.github.io/NIKUPOS/**（Settings → Pages で、Branch に `ccr-9330c02e-6mr9hb`、フォルダに `/ (root)` を選ぶ）。
+プッシュするたびに数分で更新されます。アプリは開くたびに最新版を読み込みます（通信できないときは端末に保存した版で動きます）。
+
+
 リポジトリの Settings → Pages で、公開するブランチとフォルダ（`/`）を選びます。数分で `https://<ユーザー名>.github.io/nikupos/` のようなURLで開けるようになります。
 ファイルを置くだけの静的なサイトなので、Netlify や Cloudflare Pages などでも同じように公開できます。
 
