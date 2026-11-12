@@ -112,6 +112,7 @@
               account: accounts.length ? account : '', taxRate: kind === 'out' ? taxRate : 0, memo: $('cmMemo').value.trim()
             };
             Store.addCashMove(m);
+            if (kind !== 'float') POS.openDrawer();
             POS.log('cashmove', KIND[kind] + ' ' + yen(amount) + (m.account ? '（' + m.account + '）' : '') + (m.memo ? ' ' + m.memo : ''));
             POS.closeModal();
             POS.renderSalesTab();

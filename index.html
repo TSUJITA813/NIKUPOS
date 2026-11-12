@@ -43,6 +43,7 @@
         <div class="cart-head">
           <h2>お会計</h2>
           <span class="resv-chip" id="cartResv" hidden></span>
+          <button class="btn ghost small" id="btnDrawer" hidden>引き出し</button>
           <button class="btn ghost small" id="btnCloseCart" aria-label="閉じる">閉じる ▼</button>
         </div>
         <ul class="cart-lines" id="cartLines"></ul>
@@ -167,7 +168,31 @@
               <option value="a4">A4などの普通紙</option>
             </select>
           </label>
-          <label class="check"><input type="checkbox" name="autoPrint"> 会計後に自動でレシート印刷画面を開く</label>
+          <label class="check"><input type="checkbox" name="autoPrint"> 会計後に自動でレシートを印刷する</label>
+
+          <h2>レシートプリンター（この端末）</h2>
+          <label>印刷のしかた
+            <select name="printerMode">
+              <option value="browser">端末の印刷画面から印刷（AirPrintなど）</option>
+              <option value="epson">エプソンのレシートプリンターに直接印刷（TM-m30シリーズなど）</option>
+            </select>
+          </label>
+          <div id="printerFields">
+            <label>プリンターのIPアドレス<input name="printerHost" inputmode="decimal" autocomplete="off" placeholder="例：192.168.1.50"></label>
+            <label class="check"><input type="checkbox" name="drawerAuto"> 現金が動いたら、お金の引き出し（キャッシュドロア）を自動で開ける</label>
+            <details class="more">
+              <summary>詳しい設定</summary>
+              <label>通信のしかた
+                <select name="printerProto">
+                  <option value="auto">自動（おすすめ）</option>
+                  <option value="https">https（iPhone・iPad）</option>
+                  <option value="http">http（AndroidのChrome・パソコン）</option>
+                </select>
+              </label>
+              <label>デバイスID<input name="printerDevid" autocomplete="off" placeholder="local_printer"></label>
+            </details>
+          </div>
+          <div id="printerSettings"></div>
 
           <h2>はかり</h2>
           <label>接続方式
@@ -224,6 +249,7 @@
   <script src="js/calc.js"></script>
   <script src="js/store.js"></script>
   <script src="js/scale.js"></script>
+  <script src="js/printer.js"></script>
   <script src="js/sync.js"></script>
   <script src="js/journal.js"></script>
   <script src="js/pricing.js"></script>

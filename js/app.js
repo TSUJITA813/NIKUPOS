@@ -55,12 +55,12 @@ Store.init().then(function () {
     if (d.type === 'pct') return d.value === 50 ? '半額' : d.value + '%引';
     return yen(d.value) + '引';
   }
-  function toast(msg) {
+  function toast(msg, ms) {
     var t = $('toast');
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(function () { t.hidden = true; }, 2000);
+    toast._t = setTimeout(function () { t.hidden = true; }, ms || 2000);
   }
   function vibrate() { if (navigator.vibrate) navigator.vibrate(15); }
   function isNarrow() { return window.matchMedia('(max-width: 759px)').matches; }
@@ -780,26 +780,63 @@ Store.init().then(function () {
       '<div class="sub" style="text-align:center">取引No.' + noOf(sale) + '　合計 ' + yen(t.total) +
       (p.deposit ? '　前受金 ' + yen(p.deposit) : '') +
       (p.cash > 0 ? '　お預かり ' + yen(p.received) : '') + '</div>' +
-      '<div class="btn-row" style="justify-content:center"><button class="btn small" data-act="named">宛名入り領収書</button></div>' +
+      '<div class="btn-row" style="justify-content:center"><button class="btn small" data-act="named">宛名入り領収書</button>' +
+      (usePrinter() && (p.cash > 0 || p.refund > 0) ? '<button class="btn small" data-act="drawer">引き出しを開ける</button>' : '') + '</div>' +
       '<div class="modal-foot"><button class="btn" data-act="print">レシート印刷</button>' +
       '<button class="btn primary big" data-act="next">次のお客様</button></div>',
       function (e) {
         var b = e.target.closest('button');
         if (!b) return;
         if (b.dataset.act === 'print') printReceipt(sale);
+        if (b.dataset.act === 'drawer') openDrawer();
         if (b.dataset.act === 'named') openNamedReceipt(sale);
         if (b.dataset.act === 'next') closeModal();
       },
       false
     );
-    if (settings.autoPrint) setTimeout(function () { printReceipt(sale); }, 300);
+    var cashMoved = p.cash > 0 || p.refund > 0;
+    if (settings.autoPrint) setTimeout(function () { printReceipt(sale, false, { drawer: cashMoved }); }, 300);
+    else if (cashMoved) openDrawer();
   }
 
   // ================= 印刷 =================
-  function printHtml(html) {
+  /** レシートプリンターに直接送るか（設定 → レシートプリンター） */
+  function usePrinter() { return settings.printerMode === 'epson' && !!Printer.normalizeHost(settings.printerHost); }
+  function printerCfg(src) {
+    src = src || settings;
+    return { host: src.printerHost, proto: src.printerProto || 'auto', devid: src.printerDevid || 'local_printer', paperWidth: src.paperWidth };
+  }
+  /**
+   * レシート幅の印刷。opts.drawer：現金が動いたときにお金の引き出しも開ける
+   * レシートプリンターを使う設定なら直接印刷、そうでなければ印刷画面を開く
+   */
+  function printHtml(html, opts) {
+    opts = opts || {};
+    if (usePrinter()) {
+      var drawer = !!opts.drawer && settings.drawerAuto !== false;
+      return Printer.printHtml(printerCfg(), html, { drawer: drawer }).then(function () {
+        return true;
+      }, function (e) {
+        toast('印刷できませんでした：' + e.message, 6000);
+        return false;
+      });
+    }
     var w = settings.paperWidth === '80' ? 'w80' : settings.paperWidth === 'a4' ? 'wa4' : 'w58';
     $('printArea').innerHTML = '<div class="receipt ' + w + '">' + html + '</div>';
     setTimeout(function () { window.print(); }, 50);
+    return Promise.resolve(true);
+  }
+  /** お金の引き出しを開ける（manual：会計なしで開けるとき。操作ログに残す） */
+  function openDrawer(manual) {
+    if (!usePrinter()) return Promise.resolve(false);
+    if (!manual && settings.drawerAuto === false) return Promise.resolve(false);
+    return Printer.openDrawer(printerCfg()).then(function () {
+      if (manual) POS.log('drawer', '引き出しを開けた（' + manual + '）');
+      return true;
+    }, function (e) {
+      toast('引き出しを開けられませんでした：' + e.message, 6000);
+      return false;
+    });
   }
 
   function receiptHtml(sale, reprint) {
@@ -852,7 +889,7 @@ Store.init().then(function () {
     return h;
   }
 
-  function printReceipt(sale, reprint) { printHtml(receiptHtml(sale, reprint)); }
+  function printReceipt(sale, reprint, opts) { return printHtml(receiptHtml(sale, reprint), opts); }
 
   // ================= 売上画面 =================
   function summarize(date) {
@@ -1089,7 +1126,7 @@ Store.init().then(function () {
       POS.log('return', '取引No.' + noOf(orig) + ' から返品 ' + yen(T) + '（' + (method === 'cash' ? '現金' : ctype) + '）' + (ret.reason ? ' ' + ret.reason : ''));
       closeModal();
       renderSales();
-      printReceipt(ret);
+      printReceipt(ret, false, { drawer: method === 'cash' });
       toast('返品しました。' + yen(T) + ' を返金してください');
     }
     draw();
@@ -1646,6 +1683,7 @@ Store.init().then(function () {
           r.depositMethod = depMethod;
           r.depositDate = today;
           r.depositDev = myDev();
+          if (depMethod !== 'cashless') openDrawer();
         } else {
           r.deposit = 0;
         }
@@ -1696,7 +1734,10 @@ Store.init().then(function () {
         var x = list.find(function (y) { return y.id === r.id; });
         x.status = 'cancelled';
         x.cancelledAt = new Date().toISOString();
-        if (b.dataset.act === 'refund') { x.depositRefundDate = localDate(new Date()); x.refundDev = myDev(); }
+        if (b.dataset.act === 'refund') {
+          x.depositRefundDate = localDate(new Date()); x.refundDev = myDev();
+          if (x.depositMethod !== 'cashless') openDrawer();
+        }
         saveResvList(list);
         closeModal();
         renderReservations();
@@ -1766,6 +1807,12 @@ Store.init().then(function () {
     f.elements.cashlessTypes.value = cashlessTypes().join(',');
     f.elements.categories.value = settings.categories.join(',');
     f.autoPrint.checked = !!settings.autoPrint;
+    f.elements.printerMode.value = settings.printerMode === 'epson' ? 'epson' : 'browser';
+    f.elements.printerHost.value = settings.printerHost || '';
+    f.elements.printerProto.value = settings.printerProto || 'auto';
+    f.elements.printerDevid.value = settings.printerDevid || 'local_printer';
+    f.elements.drawerAuto.checked = settings.drawerAuto !== false;
+    renderPrinterSettings();
     var counts = '店頭の売上 ' + num(Store.getSales().length) + '件・予約 ' + num(Store.getReservations().length) +
       '件・卸伝票 ' + num(Store.getSlips().length) + '件・在庫履歴 ' + num(Store.getMoves().length) + '件';
     $('storageNote').textContent = counts + (Store.usingIndexedDB() ? '' : '（※この端末では簡易保存モードで動作中。容量が小さいため、こまめにバックアップしてください）');
@@ -1806,6 +1853,68 @@ Store.init().then(function () {
     $('scaleSettings').innerHTML = h;
   }
   $('settingsForm').elements.scaleMode.addEventListener('change', renderScaleSettings);
+
+  // ---------- レシートプリンター ----------
+  function formPrinterCfg() {
+    var f = $('settingsForm').elements;
+    return printerCfg({
+      printerHost: Printer.normalizeHost(f.printerHost.value), printerProto: f.printerProto.value,
+      printerDevid: f.printerDevid.value.trim(), paperWidth: f.paperWidth.value
+    });
+  }
+  function renderPrinterSettings() {
+    var f = $('settingsForm').elements;
+    var epson = f.printerMode.value === 'epson';
+    $('printerFields').hidden = !epson;
+    if (!epson) {
+      $('printerSettings').innerHTML = '<p class="note">会計のたびに端末の印刷画面が開きます。エプソンのTM-m30シリーズなど、' +
+        'ネットワーク（Wi-Fi・LAN）につながるレシートプリンターを使うと、印刷画面を出さずにすぐ印刷でき、お金の引き出しも自動で開けられます。</p>';
+      return;
+    }
+    var ios = Printer.isIOS();
+    var host = Printer.normalizeHost(f.printerHost.value);
+    $('printerSettings').innerHTML = '<div class="sync-box printer-box">' +
+      '<div class="btn-row">' +
+      '<button type="button" class="btn small" data-pr="test"' + (host ? '' : ' disabled') + '>テスト印刷</button>' +
+      '<button type="button" class="btn small" data-pr="drawer"' + (host ? '' : ' disabled') + '>引き出しを開けてみる</button>' +
+      '<button type="button" class="btn small" data-pr="cert"' + (host ? '' : ' disabled') + '>証明書の許可ページを開く</button></div>' +
+      '<p class="note" id="printerResult"></p>' +
+      '<details class="more"><summary>はじめて使うときの準備</summary><ol class="note" style="margin:4px 0;padding-left:1.4em">' +
+      '<li>プリンターを、この端末と同じWi-Fi（またはWi-Fiルーターに有線LAN）につなぎます。</li>' +
+      '<li>プリンターの「ステータスシート」を印刷して、IPアドレスを確認します（印刷のしかたは機種の説明書をご覧ください）。' +
+      'IPアドレスが変わらないよう、固定にしておくのがおすすめです。</li>' +
+      '<li>パソコンなどのブラウザで https://（IPアドレス）/ を開き、プリンターの設定画面で「ePOS-Print」を「有効」にします（多くの機種は最初から有効です）。</li>' +
+      '<li>上の欄にIPアドレスを入れて保存し、「テスト印刷」を押します。</li>' +
+      (ios
+        ? '<li>iPhone・iPadでつながらないときは「証明書の許可ページを開く」を押し、警告が出たら「詳細を表示」→「このWebサイトを閲覧」を選びます。' +
+          'それでもつながらないときは、プリンターの設定画面から証明書をダウンロードし、iPhoneの「設定 → 一般 → 情報 → 証明書信頼設定」で信頼してください。</li>'
+        : '<li>AndroidのChromeで「ローカルネットワーク上のデバイスへのアクセス」を確認されたら「許可」を選びます。' +
+          'つながらないときは「証明書の許可ページを開く」を押し、警告が出たら「詳細設定」→「（IPアドレス）にアクセスする」を選んでください。</li>') +
+      '<li>お金の引き出しは、プリンターの「DKD」端子につなぎます。</li>' +
+      '</ol></details></div>';
+  }
+  $('settingsForm').elements.printerMode.addEventListener('change', renderPrinterSettings);
+  $('settingsForm').elements.printerHost.addEventListener('input', function () {
+    var host = Printer.normalizeHost(this.value);
+    $('printerSettings').querySelectorAll('[data-pr]').forEach(function (b) { b.disabled = !host; });
+  });
+  $('printerSettings').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-pr]');
+    if (!b) return;
+    var cfg = formPrinterCfg();
+    var out = $('printerResult');
+    if (b.dataset.pr === 'cert') { window.open(Printer.certUrl(cfg), '_blank', 'noopener'); return; }
+    out.textContent = '送信中…';
+    var job = b.dataset.pr === 'test' ? Printer.testPage(cfg, settings.storeName) : Printer.openDrawer(cfg);
+    job.then(function () {
+      out.textContent = b.dataset.pr === 'test' ? '印刷できました。設定を「保存」してください。' : '引き出しを開ける信号を送りました。';
+    }, function (err) { out.textContent = err.message; });
+  });
+
+  function updateDrawerButton() { $('btnDrawer').hidden = !usePrinter(); }
+  $('btnDrawer').addEventListener('click', function () {
+    POS.requirePerm('drawer', '引き出しを開ける').then(function (ok) { if (ok) openDrawer('会計なし'); });
+  });
   $('scaleSettings').addEventListener('click', function (e) {
     var b = e.target.closest('[data-scale]');
     if (!b) return;
@@ -1829,7 +1938,13 @@ Store.init().then(function () {
     settings.categories = f.elements.categories.value.split(/[,、，]/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!settings.categories.length) settings.categories = ['その他'];
     settings.autoPrint = f.autoPrint.checked;
+    settings.printerMode = f.elements.printerMode.value;
+    settings.printerHost = Printer.normalizeHost(f.elements.printerHost.value);
+    settings.printerProto = f.elements.printerProto.value;
+    settings.printerDevid = f.elements.printerDevid.value.trim() || 'local_printer';
+    settings.drawerAuto = f.elements.drawerAuto.checked;
     Store.saveSettings(settings);
+    updateDrawerButton();
     POS.log('settings', '店舗・レシート設定を保存');
     applyStoreName();
     toast('設定を保存しました');
@@ -1946,6 +2061,7 @@ Store.init().then(function () {
     round: round, toast: toast, isNarrow: isNarrow, row: row, card: card, priceLabel: priceLabel,
     openModal: openModal, closeModal: closeModal, modalBody: modalBody,
     printHtml: printHtml, printDoc: printDoc, saveFile: saveFile,
+    openDrawer: openDrawer, usePrinter: function () { return usePrinter(); },
     products: function () { return products; },
     settings: function () { return settings; },
     saveProducts: function () { Store.saveProducts(products); },
@@ -2109,6 +2225,7 @@ Store.init().then(function () {
 
   // ================= 起動 =================
   applyStoreName();
+  updateDrawerButton();
   tick();
   setInterval(tick, 10000);
   currentCat = '__all';

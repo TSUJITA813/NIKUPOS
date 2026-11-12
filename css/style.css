@@ -513,3 +513,10 @@ tr.void td.act { text-decoration: none; }
 .price-table tr.changed input { border-color: #d9a441; font-weight: 700; }
 @media (max-width: 759px) { .price-table input { width: 84px; } }
 .modal:has(#imDateL), .modal:has(.changes-wide) { max-width: 760px; }
+
+/* レシートプリンター */
+#printerFields, .form details.more { display: grid; gap: 12px; }
+.form details.more > summary { color: var(--muted); cursor: pointer; font-size: 14px; padding: 4px 0; }
+.printer-box { display: grid; gap: 8px; }
+.printer-box .btn-row { margin: 0; }
+#printerResult:empty { display: none; }

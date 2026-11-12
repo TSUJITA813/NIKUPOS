@@ -11,9 +11,9 @@
 
   var ACTIONS = [
     ['void', '取引の取消'], ['return', '返品・返金'], ['discount', '手動の値引き'], ['cashmove', '入出金'],
-    ['closing', 'レジの精算'], ['products', '商品・価格の変更'], ['settings', '設定・セールの変更・データ管理']
+    ['closing', 'レジの精算'], ['drawer', '会計なしで引き出しを開ける'], ['products', '商品・価格の変更'], ['settings', '設定・セールの変更・データ管理']
   ];
-  var DEFAULT_PERMS = { 'void': true, 'return': true, discount: true, cashmove: false, closing: false, products: true, settings: true };
+  var DEFAULT_PERMS = { 'void': true, 'return': true, discount: true, cashmove: false, closing: false, drawer: false, products: true, settings: true };
   var CUR_KEY = 'nikupos.currentStaff';
   var LOCK_KEY = 'nikupos.autoLockMin';
 
