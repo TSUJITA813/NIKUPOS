@@ -452,3 +452,6 @@ tr.void td.act { text-decoration: none; }
 .sync-box .form { margin-top: 8px; }
 .sync-state { display: flex; align-items: center; gap: 8px; font-weight: 700; }
 .sync-state .sync-dot { border-color: var(--line); cursor: default; }
+
+/* 得意先元帳は表が横に広いので、画面を広く使う */
+.modal:has(#lgBody) { max-width: 920px; }

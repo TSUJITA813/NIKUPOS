@@ -343,7 +343,102 @@
     return a;
   }
 
+  // ================= 掛売り（得意先ごとの売掛金） =================
+
+  function ymd(y, m, d) { return y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d; }
+
+  /**
+   * 支払期限。締め日から months か月後の day 日（29以上は月末）
+   * 例：月末締め・翌月末払い → dueDate('2026-11-30', 1, 31) = '2026-12-31'
+   */
+  function dueDate(closingDate, months, day) {
+    var p = closingDate.split('-').map(Number);
+    var y = p[0];
+    var m = p[1] + (months || 0);
+    while (m > 12) { m -= 12; y++; }
+    var last = new Date(y, m, 0).getDate();
+    return ymd(y, m, day >= 29 ? last : Math.min(day, last));
+  }
+
+  function byCreated(a, b) { return (a.createdAt || '').localeCompare(b.createdAt || '') || a.no - b.no; }
+
+  /**
+   * 請求書ごとの入金状況。得意先の入金を古い請求書から順に充てる（消込）。
+   * 各請求書で充てる対象は、その請求書の「今回お買上額（税込）」。
+   * @returns { 請求書ID: { amount, paid, remaining, status: 'paid'|'partial'|'unpaid', overdue } }
+   */
+  function invoiceStatus(customerId, invoices, receipts, today) {
+    var pool = 0;
+    receipts.forEach(function (r) { if (r.customerId === customerId) pool += r.amount; });
+    var out = {};
+    invoices.filter(function (i) { return i.customerId === customerId; }).sort(byCreated).forEach(function (i) {
+      var amount = i.purchase;
+      var paid = Math.max(0, Math.min(amount, pool));
+      pool -= paid;
+      var remaining = amount - paid;
+      out[i.id] = {
+        amount: amount, paid: paid, remaining: remaining,
+        status: remaining <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+        overdue: remaining > 0 && !!i.dueDate && i.dueDate < today
+      };
+    });
+    return out;
+  }
+
+  /**
+   * 得意先元帳：納品（掛け）・入金・請求を日付順に並べ、売掛残高の推移を出す
+   * @returns [{ date, kind: 'delivery'|'receipt'|'invoice', ref, debit, credit, balance, item }]
+   */
+  function customerLedger(customerId, slips, receipts, invoices) {
+    var rows = [];
+    slips.forEach(function (s) {
+      if (s.customerId === customerId && s.status === 'delivered' && s.payment === 'credit') {
+        rows.push({ date: s.date, kind: 'delivery', order: 0, debit: s.totals.total, credit: 0, item: s });
+      }
+    });
+    invoices.forEach(function (i) {
+      if (i.customerId === customerId) rows.push({ date: i.issueDate, kind: 'invoice', order: 1, debit: 0, credit: 0, item: i });
+    });
+    receipts.forEach(function (r) {
+      if (r.customerId === customerId) rows.push({ date: r.date, kind: 'receipt', order: 2, debit: 0, credit: r.amount, item: r });
+    });
+    rows.sort(function (a, b) { return a.date.localeCompare(b.date) || a.order - b.order; });
+    var bal = 0;
+    rows.forEach(function (r) { bal += r.debit - r.credit; r.balance = bal; });
+    return rows;
+  }
+
+  /**
+   * 得意先ごとの売掛金のまとめ
+   * balance 売掛残高 / unbilled 未請求（締め前の納品）/ billedUnpaid 請求済で未入金 / overdue うち支払期限切れ / nextDue 次の支払期限
+   */
+  function receivableSummary(customerId, slips, receipts, invoices, today) {
+    var st = invoiceStatus(customerId, invoices, receipts, today);
+    var billedUnpaid = 0;
+    var overdue = 0;
+    var nextDue = '';
+    invoices.forEach(function (i) {
+      var x = st[i.id];
+      if (!x || x.remaining <= 0) return;
+      billedUnpaid += x.remaining;
+      if (x.overdue) overdue += x.remaining;
+      else if (i.dueDate && (!nextDue || i.dueDate < nextDue)) nextDue = i.dueDate;
+    });
+    var unbilled = 0;
+    slips.forEach(function (s) {
+      if (s.customerId === customerId && s.status === 'delivered' && s.payment === 'credit' && !s.invoiceId) unbilled += s.totals.total;
+    });
+    return {
+      balance: receivableBalance(customerId, slips, receipts),
+      unbilled: unbilled, billedUnpaid: billedUnpaid, overdue: overdue, nextDue: nextDue, invoices: st
+    };
+  }
+
   var Calc = {
+    dueDate: dueDate,
+    invoiceStatus: invoiceStatus,
+    customerLedger: customerLedger,
+    receivableSummary: receivableSummary,
     wsLineAmount: wsLineAmount,
     wsTotals: wsTotals,
     lastClosingDate: lastClosingDate,

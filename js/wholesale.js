@@ -1,8 +1,9 @@
 /*
  * 卸（飲食店などへの販売）
  *  伝票：受注 → 納品（実際の重さに修正）→ 納品書印刷。納品で在庫が減る
- *  取引先：単価（取引先ごとに最後に使った単価を記憶）、支払条件（掛け・締め日／現金）、売掛残高
- *  請求・入金：締め日ごとの請求書（適格請求書）、入金の記録
+ *  得意先：単価（得意先ごとに最後に使った単価を記憶）、支払条件（掛け：締め日・支払期限／現金）、与信限度額、
+ *          売掛金（未請求・請求済未入金・支払期限切れ）、得意先元帳
+ *  請求・入金：締め日ごとの請求書（適格請求書・ワンタップ発行）、入金の記録と請求書への消込
  * 金額は税抜単価 × 数量、消費税は伝票・請求書ごとに税率別に1回だけ端数処理（外税）。
  */
 (window.NIKUPOS_MODULES = window.NIKUPOS_MODULES || []).push(function (POS) {
@@ -26,21 +27,58 @@
   function kg(g) { return (Math.round(g) / 1000).toLocaleString('ja-JP', { maximumFractionDigits: 3 }) + 'kg'; }
   function qtyText(l) { return l.unit === 'g' ? kg(l.qty) : num(l.qty) + '個'; }
   function unitPriceText(l) { return yen(l.price) + (l.unit === 'g' ? '/kg' : '/個'); }
+  // 支払期限の選択肢 [何か月後, 日(31=末), 表示]
+  var PAY_TERMS = [[0, 31, '当月末'], [1, 5, '翌月5日'], [1, 10, '翌月10日'], [1, 15, '翌月15日'], [1, 20, '翌月20日'], [1, 25, '翌月25日'],
+    [1, 31, '翌月末'], [2, 10, '翌々月10日'], [2, 31, '翌々月末']];
+  function payMonths(c) { return c.payMonths != null ? c.payMonths : 1; }
+  function payDay(c) { return c.payDay != null ? c.payDay : 31; }
+  /** 例：「月末締め・翌月末払い」 */
+  function termsText(c) {
+    var t = PAY_TERMS.find(function (x) { return x[0] === payMonths(c) && x[1] === payDay(c); });
+    return (c.closingDay >= 29 ? '月末' : c.closingDay + '日') + '締め・' + (t ? t[2] : '') + '払い';
+  }
   function closingText(c) {
     var mode = c.priceMode === 'incl' ? '・税込単価' : '';
     if (c.payment !== 'credit') return '現金（納品時）' + mode;
-    return '掛け・' + (c.closingDay >= 29 ? '月末' : '毎月' + c.closingDay + '日') + '締め' + mode;
+    return '掛け・' + termsText(c) + mode;
+  }
+  function honor(c) { return (c && c.honorific) || '御中'; }
+  function statusPill(st) {
+    if (!st) return '';
+    if (st.status === 'paid') return '<span class="pill ok">入金済</span>';
+    if (st.overdue) return '<span class="pill">期限切れ 残' + yen(st.remaining) + '</span>';
+    if (st.status === 'partial') return '<span class="pill warn">一部入金 残' + yen(st.remaining) + '</span>';
+    return '<span class="pill warn">未入金</span>';
+  }
+  /** インボイス登録番号が未設定なら確認 */
+  function checkInvoiceNo() {
+    if (settings().invoiceNo) return true;
+    return confirm('設定で「インボイス登録番号」が入っていません。このままでは適格請求書になりません。\n続けて発行しますか？');
   }
   function modeOf(x) { return x && x.priceMode === 'incl' ? 'incl' : 'excl'; }
   function modeLabel(m) { return m === 'incl' ? '税込' : '税抜'; }
-  /** 取引先に合わせた単価の初期値（記憶した単価 → 商品マスタの卸単価。税込の取引先は税込に換算） */
+  /** 得意先に合わせた単価の初期値（記憶した単価 → 商品マスタの卸単価。税込の得意先は税込に換算） */
   function defaultPrice(c, p) {
     if (c && c.prices && c.prices[p.id]) return c.prices[p.id];
     var base = p.wsPrice || 0;
     return modeOf(c) === 'incl' ? Math.round((base * (100 + p.taxRate)) / 100) : base;
   }
   function sortedCustomers() {
-    return Store.getCustomers().slice().sort(function (a, b) { return (a.kana || a.name).localeCompare(b.kana || b.name, 'ja'); });
+    return Store.getCustomers().slice().sort(function (a, b) {
+      return (a.code || '\uffff').localeCompare(b.code || '\uffff', 'ja', { numeric: true }) ||
+        (a.kana || a.name).localeCompare(b.kana || b.name, 'ja');
+    });
+  }
+  function summaryOf(c) {
+    return Calc.receivableSummary(c.id, Store.getSlips(), Store.getReceipts(), Store.getInvoices(), today());
+  }
+  /** 締め日を過ぎて、まだ請求していない納品がある掛けの得意先 */
+  function pendingClosings() {
+    return sortedCustomers().filter(function (c) {
+      if (c.payment !== 'credit') return false;
+      var x = Calc.buildInvoice(c.id, Calc.lastClosingDate(today(), c.closingDay), Store.getSlips(), Store.getReceipts(), Store.getInvoices(), round());
+      return x.slipIds.length > 0;
+    });
   }
 
   POS.addBadge(function () {
@@ -54,7 +92,7 @@
   // ================= 画面 =================
   function render() {
     var h = '<div class="subtabs">' +
-      [['slips', '伝票（受注・納品）'], ['customers', '取引先'], ['billing', '請求・入金']].map(function (t) {
+      [['slips', '伝票（受注・納品）'], ['customers', '得意先'], ['billing', '売掛・請求・入金']].map(function (t) {
         return '<button class="btn' + (tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>';
       }).join('') + '</div>';
     if (tab === 'slips') h += renderSlips();
@@ -114,76 +152,99 @@
         '　<button class="btn small" data-csv="month">この月の伝票をCSV出力</button></p>';
     }
     if (!Store.getCustomers().length) {
-      h += '<p class="note">まず「取引先」タブで、卸先のお店を登録してください。</p>';
+      h += '<p class="note">まず「得意先」タブで、卸先のお店を登録してください。</p>';
     }
     h += list.length ? list.map(slipCard).join('') : '<p class="note">伝票はありません。</p>';
     return h;
   }
 
-  // ---------- 取引先一覧 ----------
+  // ---------- 得意先一覧 ----------
   function renderCustomers() {
-    var slips = Store.getSlips();
-    var receipts = Store.getReceipts();
-    var h = '<div class="toolbar"><h2>取引先</h2><span class="spacer"></span>' +
-      '<button class="btn primary small" data-c="new">＋ 取引先を追加</button></div>';
+    var h = '<div class="toolbar"><h2>得意先</h2><span class="spacer"></span>' +
+      '<button class="btn primary small" data-c="new">＋ 得意先を追加</button></div>';
     var list = sortedCustomers();
-    if (!list.length) return h + '<p class="note">取引先がありません。「＋ 取引先を追加」から登録してください。</p>';
+    if (!list.length) return h + '<p class="note">得意先がありません。「＋ 得意先を追加」から登録してください。</p>';
     h += list.map(function (c) {
-      var bal = Calc.receivableBalance(c.id, slips, receipts);
-      return '<div class="list-item"><div class="li-top"><span class="li-title">' + esc(c.name) + '</span>' +
+      var credit = c.payment === 'credit';
+      var sm = credit ? summaryOf(c) : null;
+      var over = credit && c.creditLimit > 0 && sm.balance > c.creditLimit;
+      return '<div class="list-item"><div class="li-top">' +
+        (c.code ? '<span class="pill gray">' + esc(c.code) + '</span>' : '') +
+        '<span class="li-title">' + esc(c.name) + '</span>' +
         '<span class="pill gray">' + closingText(c) + '</span>' +
-        (c.payment === 'credit' ? '<span class="li-amt' + (bal < 0 ? ' neg' : '') + '">売掛残 ' + yen(bal) + '</span>' : '') + '</div>' +
+        (credit ? '<span class="li-amt' + (sm.balance < 0 ? ' neg' : '') + '">売掛残 ' + yen(sm.balance) + '</span>' : '') + '</div>' +
+        (credit ? '<div class="li-sub">未請求 ' + yen(sm.unbilled) + '・請求済未入金 ' + yen(sm.billedUnpaid) +
+          (sm.overdue ? '・<b class="neg">期限切れ ' + yen(sm.overdue) + '</b>' : '') +
+          (sm.nextDue ? '・次の支払期限 ' + POS.weekday(sm.nextDue) : '') +
+          (c.creditLimit ? '・与信限度 ' + yen(c.creditLimit) + (over ? ' <b class="neg">超過</b>' : '') : '') + '</div>' : '') +
         '<div class="li-sub">' + [c.person && esc(c.person) + ' 様', c.tel && '<a class="resv-tel" href="tel:' + esc(c.tel.replace(/[^\d+]/g, '')) + '">' + esc(c.tel) + '</a>', esc(c.address || '')].filter(Boolean).join('・') + '</div>' +
-        '<div class="btn-row"><button class="btn" data-c="edit" data-id="' + c.id + '">編集</button>' +
-        '<button class="btn" data-s="new" data-cid="' + c.id + '">伝票を作成</button>' +
-        (c.payment === 'credit' ? '<button class="btn" data-b="receipt" data-cid="' + c.id + '">入金を登録</button>' +
-          '<button class="btn" data-b="invoice" data-cid="' + c.id + '">請求書を作成</button>' : '') +
+        '<div class="btn-row"><button class="btn" data-s="new" data-cid="' + c.id + '">伝票を作成</button>' +
+        (credit ? '<button class="btn primary" data-b="oneinv" data-cid="' + c.id + '">締め分の請求書</button>' +
+          '<button class="btn" data-b="receipt" data-cid="' + c.id + '">入金を登録</button>' : '') +
+        '<button class="btn" data-c="ledger" data-id="' + c.id + '">得意先元帳</button>' +
+        '<button class="btn" data-c="edit" data-id="' + c.id + '">編集</button>' +
         '</div></div>';
     }).join('');
     return h;
   }
 
-  // ---------- 請求・入金 ----------
+  // ---------- 売掛・請求・入金 ----------
   function renderBilling() {
-    var slips = Store.getSlips();
-    var h = '<div class="btn-row"><button class="btn primary" data-b="invoice">請求書を作成</button>' +
-      '<button class="btn" data-b="bulk">締め日で一括作成</button>' +
+    var credits = sortedCustomers().filter(function (c) { return c.payment === 'credit'; });
+    var sums = {};
+    var tot = { balance: 0, unbilled: 0, billedUnpaid: 0, overdue: 0 };
+    credits.forEach(function (c) {
+      var x = sums[c.id] = summaryOf(c);
+      Object.keys(tot).forEach(function (k) { tot[k] += x[k]; });
+    });
+    var pend = pendingClosings();
+    var h = '';
+    if (pend.length) {
+      h += '<div class="list-item" style="border-left:6px solid var(--accent)"><div class="li-top"><span class="li-title">締め日を過ぎた未請求があります（' + pend.length + '社）</span></div>' +
+        '<div class="li-sub">' + pend.map(function (c) { return esc(c.name); }).join('、') + '</div>' +
+        '<div class="btn-row"><button class="btn primary" data-b="bulk">' + pend.length + '社分の請求書をまとめて発行・印刷</button></div></div>';
+    }
+    h += '<div class="cards">' +
+      POS.card('売掛金の合計', yen(tot.balance)) +
+      POS.card('うち支払期限切れ', '<span class="' + (tot.overdue ? 'neg' : '') + '">' + yen(tot.overdue) + '</span>') +
+      POS.card('請求済・未入金', yen(tot.billedUnpaid)) +
+      POS.card('未請求（締め前）', yen(tot.unbilled)) + '</div>';
+    h += '<div class="btn-row"><button class="btn" data-b="invoice">請求書を作成（締め日を指定）</button>' +
       '<button class="btn" data-b="receipt">入金を登録</button></div>';
 
-    // 未請求
-    var pending = {};
-    slips.forEach(function (s) {
-      if (s.status === 'delivered' && s.payment === 'credit' && !s.invoiceId) {
-        var p = pending[s.customerId] || (pending[s.customerId] = { n: 0, total: 0 });
-        p.n++;
-        p.total += s.totals.total;
-      }
-    });
-    var pk = Object.keys(pending);
-    h += '<h2>まだ請求していない納品</h2>';
-    h += pk.length ? '<div class="table-wrap"><table><thead><tr><th>取引先</th><th class="r">伝票</th><th class="r">金額（税込）</th></tr></thead><tbody>' +
-      pk.map(function (cid) {
-        var c = customerById(cid);
-        return '<tr><td>' + esc(c ? c.name : '') + '</td><td class="r">' + pending[cid].n + '件</td><td class="r num">' + yen(pending[cid].total) + '</td></tr>';
-      }).join('') + '</tbody></table></div>' : '<p class="note">ありません。</p>';
+    h += '<h2>得意先ごとの売掛金</h2>';
+    h += credits.length ? '<div class="table-wrap"><table><thead><tr><th>得意先</th><th class="r">売掛残</th><th class="r">期限切れ</th>' +
+      '<th class="r">請求済未入金</th><th class="r">未請求</th><th>次の支払期限</th></tr></thead><tbody>' +
+      credits.map(function (c) {
+        var x = sums[c.id];
+        return '<tr data-cid="' + c.id + '" style="cursor:pointer"><td>' + esc(c.name) + '</td><td class="r num"><b>' + yen(x.balance) + '</b></td>' +
+          '<td class="r num' + (x.overdue ? ' neg' : '') + '">' + (x.overdue ? yen(x.overdue) : '—') + '</td>' +
+          '<td class="r num">' + yen(x.billedUnpaid) + '</td><td class="r num">' + yen(x.unbilled) + '</td>' +
+          '<td>' + (x.nextDue ? POS.weekday(x.nextDue) : '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div><p class="note">行をタップすると得意先元帳を表示します。入金は古い請求書から順に充てています。</p>'
+      : '<p class="note">掛け売りの得意先はありません。</p>';
 
     var invs = Store.getInvoices().slice().sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || '') || b.no - a.no; }).slice(0, 50);
     var latest = {};
     Store.getInvoices().forEach(function (i) { if (!latest[i.customerId]) latest[i.customerId] = Calc.latestInvoice(i.customerId, Store.getInvoices()); });
     h += '<h2>請求書</h2>';
     h += invs.length ? invs.map(function (i) {
+      var st = sums[i.customerId] ? sums[i.customerId].invoices[i.id] : null;
       return '<div class="list-item"><div class="li-top"><span class="li-title">' + esc(i.customerName) + '</span>' +
+        statusPill(st) +
         '<span class="li-sub">No.' + noOf(i) + '・' + i.periodTo + ' 締め</span>' +
         '<span class="li-amt">' + yen(i.billed) + '</span></div>' +
-        '<div class="li-sub">今回お買上 ' + yen(i.purchase) + '（うち消費税 ' + yen(i.tax) + '）・繰越 ' + yen(i.carry) + '・発行 ' + i.issueDate + '</div>' +
+        '<div class="li-sub">今回お買上 ' + yen(i.purchase) + '（うち消費税 ' + yen(i.tax) + '）・繰越 ' + yen(i.carry) +
+        (i.dueDate ? '・支払期限 ' + POS.weekday(i.dueDate) : '') + '・発行 ' + i.issueDate + '</div>' +
         '<div class="btn-row"><button class="btn" data-b="print" data-id="' + i.id + '">印刷</button>' +
+        (st && st.remaining > 0 ? '<button class="btn primary" data-b="paid" data-id="' + i.id + '">入金済にする（' + yen(st.remaining) + '）</button>' : '') +
         (latest[i.customerId] === i ? '<button class="btn danger-outline" data-b="undo" data-id="' + i.id + '">作り直す（取消）</button>' : '') +
         '</div></div>';
     }).join('') : '<p class="note">まだ請求書はありません。</p>';
 
     var rcs = Store.getReceipts().slice().sort(function (a, b) { return b.date.localeCompare(a.date) || (b.id < a.id ? -1 : 1); }).slice(0, 50);
     h += '<h2>入金</h2>';
-    h += rcs.length ? '<div class="table-wrap"><table><thead><tr><th>日付</th><th>取引先</th><th>方法</th><th class="r">金額</th><th></th></tr></thead><tbody>' +
+    h += rcs.length ? '<div class="table-wrap"><table><thead><tr><th>日付</th><th>得意先</th><th>方法</th><th class="r">金額</th><th></th></tr></thead><tbody>' +
       rcs.map(function (r) {
         var c = customerById(r.customerId);
         return '<tr><td>' + r.date + '</td><td>' + esc(c ? c.name : '') + '</td><td>' + METHOD[r.method] + (r.note ? '・' + esc(r.note) : '') + '</td>' +
@@ -198,6 +259,8 @@
     if (e.target.id === 'wsDate') { wsDate = e.target.value || today(); scope = 'day'; render(); }
   });
   $('wsRoot').addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-cid]');
+    if (tr && !e.target.closest('button')) { openLedger(customerById(tr.dataset.cid)); return; }
     var b = e.target.closest('button');
     if (!b) return;
     var d = b.dataset;
@@ -223,6 +286,9 @@
     else if (d.s === 'cancel') cancelSlip(slip);
     else if (d.c === 'new') openCustomerModal(null);
     else if (d.c === 'edit') openCustomerModal(customerById(d.id));
+    else if (d.c === 'ledger') openLedger(customerById(d.id));
+    else if (d.b === 'oneinv') oneTapInvoice(customerById(d.cid));
+    else if (d.b === 'paid') markPaid(Store.getInvoices().find(function (i) { return i.id === d.id; }));
     else if (d.b === 'receipt') openReceiptModal(d.cid);
     else if (d.b === 'invoice') openInvoiceModal(d.cid);
     else if (d.b === 'bulk') bulkInvoices();
@@ -277,7 +343,7 @@
       '<h3>' + title + '</h3>' +
       (deliverIntent ? '<div class="sub">実際に納める重さ・数量に直してから「納品済にする」を押してください。</div>' : '') +
       '<form class="form" id="wForm" onsubmit="return false" style="margin-top:8px">' +
-      '<label>取引先<select name="customer">' + customers.map(function (c) {
+      '<label>得意先<select name="customer">' + customers.map(function (c) {
         return '<option value="' + c.id + '"' + (c.id === s.customerId ? ' selected' : '') + '>' + esc(c.name) + '</option>';
       }).join('') + '</select></label>' +
       '<label>納品日<input type="date" name="date" value="' + esc(s.date) + '"></label>' +
@@ -288,6 +354,7 @@
       '<label>お支払い<div class="seg"><button type="button" class="btn small" data-pay="credit">掛け（請求書）</button>' +
       '<button type="button" class="btn small" data-pay="cash">現金（納品時に受取）</button></div></label>' +
       '<label>メモ<input name="note" value="' + esc(s.note) + '" autocomplete="off" placeholder="例：午前中に納品、骨なし"></label>' +
+      (s.status !== 'delivered' ? '<label class="check"><input type="checkbox" id="wAutoPrint"' + (autoSlipPrint() ? ' checked' : '') + '> 納品済にしたら、すぐ納品書を印刷する</label>' : '') +
       '</form>' +
       '<div class="modal-foot">' + foot + '</div>',
       function (e) {
@@ -321,7 +388,7 @@
       if (c) {
         s.payment = c.payment;
         s.priceMode = modeOf(c);
-        // まだ単価を手で変えていない行は、この取引先の単価に合わせる
+        // まだ単価を手で変えていない行は、この得意先の単価に合わせる
         lines.forEach(function (l) {
           if (l.priceEdited) return;
           var p = productById(l.productId);
@@ -381,7 +448,7 @@
     }
 
     function save(status) {
-      if (!s.customerId || !cust()) { alert('取引先を選んでください'); return; }
+      if (!s.customerId || !cust()) { alert('得意先を選んでください'); return; }
       if (!lines.length) { alert('商品を追加してください'); return; }
       for (var i = 0; i < lines.length; i++) {
         if (!(lines[i].qty > 0)) { alert('「' + lines[i].name + '」の数量を入れてください'); return; }
@@ -390,6 +457,15 @@
       var c = cust();
       var newLines = calcLines();
       var wasDelivered = orig && orig.status === 'delivered';
+      // 与信限度額（掛けで売ってよい上限）の確認
+      if (s.payment === 'credit' && c.creditLimit > 0) {
+        var t0 = Calc.wsTotals(newLines, round()).total;
+        var bal = Calc.receivableBalance(c.id, Store.getSlips(), Store.getReceipts()) - (wasDelivered && orig.payment === 'credit' ? orig.totals.total : 0);
+        if (bal + t0 > c.creditLimit &&
+          !confirm(c.name + ' の売掛金が与信限度額を超えます。\n売掛残 ' + yen(bal) + ' ＋ 今回 ' + yen(t0) + ' ＞ 限度 ' + yen(c.creditLimit) + '\nこのまま保存しますか？')) return;
+      }
+      var printAfter = $('wAutoPrint') ? $('wAutoPrint').checked : false;
+      if ($('wAutoPrint')) setAutoSlipPrint(printAfter);
       s.customerName = c.name;
       s.date = form.date.value || today();
       s.note = form.note.value.trim();
@@ -413,7 +489,7 @@
 
       // 在庫は「納品済」の伝票から自動で計算される（ここでは記録しない）
 
-      // 取引先ごとの単価を記憶
+      // 得意先ごとの単価を記憶
       c.prices = c.prices || {};
       newLines.forEach(function (l) { if (l.price > 0) c.prices[l.productId] = l.price; });
       Store.saveCustomers(Store.getCustomers());
@@ -426,11 +502,19 @@
       POS.refreshBadges();
       if (status === 'delivered' && !wasDelivered) {
         POS.toast('納品済にしました' + (s.payment === 'cash' ? '（現金 ' + yen(s.totals.total) + ' を受け取ってください）' : ''));
+        if (printAfter) printSlip(s);
       } else POS.toast('保存しました');
     }
 
     drawLines();
     drawPay();
+  }
+
+  function autoSlipPrint() {
+    try { return localStorage.getItem('nikupos.autoSlipPrint') !== '0'; } catch (e) { return true; }
+  }
+  function setAutoSlipPrint(v) {
+    try { localStorage.setItem('nikupos.autoSlipPrint', v ? '1' : '0'); } catch (e) { /* noop */ }
   }
 
   function cancelSlip(s) {
@@ -447,17 +531,25 @@
     POS.toast('取り消しました');
   }
 
-  // ================= 取引先 =================
+  // ================= 得意先 =================
   function openCustomerModal(orig) {
     var isNew = !orig;
-    var c = orig ? JSON.parse(JSON.stringify(orig)) : { name: '', person: '', tel: '', address: '', payment: 'credit', closingDay: 31, priceMode: 'excl', note: '', prices: {} };
+    var c = orig ? JSON.parse(JSON.stringify(orig)) : {
+      code: '', name: '', kana: '', honorific: '御中', person: '', tel: '', address: '', payment: 'credit',
+      closingDay: 31, payMonths: 1, payDay: 31, creditLimit: 0, priceMode: 'excl', note: '', prices: {}
+    };
     var origMode = modeOf(c);
     var days = [5, 10, 15, 20, 25, 31];
     var used = !isNew && Store.getSlips().some(function (s) { return s.customerId === c.id; });
     POS.openModal(
-      '<h3>' + (isNew ? '取引先を追加' : '取引先の編集') + '</h3>' +
+      '<h3>' + (isNew ? '得意先を追加' : '得意先の編集') + '</h3>' +
       '<form class="form" id="cForm" onsubmit="return false" style="margin-top:8px">' +
-      '<label>店名・会社名<input name="name" value="' + esc(c.name) + '" autocomplete="off" placeholder="例：居酒屋 とりまる"></label>' +
+      '<div style="display:grid;grid-template-columns:110px 1fr;gap:8px">' +
+      '<label>得意先コード<input name="code" value="' + esc(c.code || '') + '" autocomplete="off" placeholder="例：001"></label>' +
+      '<label>店名・会社名<input name="name" value="' + esc(c.name) + '" autocomplete="off" placeholder="例：居酒屋 とりまる"></label></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 110px;gap:8px">' +
+      '<label>ふりがな（並び順に使います）<input name="kana" value="' + esc(c.kana || '') + '" autocomplete="off"></label>' +
+      '<label>敬称<select name="honorific"><option' + (honor(c) === '御中' ? ' selected' : '') + '>御中</option><option' + (honor(c) === '様' ? ' selected' : '') + '>様</option></select></label></div>' +
       '<label>ご担当者<input name="person" value="' + esc(c.person) + '" autocomplete="off"></label>' +
       '<label>電話番号<input name="tel" type="tel" inputmode="tel" value="' + esc(c.tel) + '" autocomplete="off"></label>' +
       '<label>住所<input name="address" value="' + esc(c.address) + '" autocomplete="off"></label>' +
@@ -465,9 +557,15 @@
       '<button type="button" class="btn small" data-pay="cash">現金（納品時）</button></div></label>' +
       '<label>単価の扱い<div class="seg"><button type="button" class="btn small" data-mode="excl">税抜（消費税は別）</button>' +
       '<button type="button" class="btn small" data-mode="incl">税込（消費税込み）</button></div></label>' +
-      '<label id="cClose">締め日<select name="closingDay">' + days.map(function (d) {
+      '<div id="cClose" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<label>締め日<select name="closingDay">' + days.map(function (d) {
         return '<option value="' + d + '"' + (d === c.closingDay ? ' selected' : '') + '>' + (d === 31 ? '月末' : '毎月' + d + '日') + '</option>';
       }).join('') + '</select></label>' +
+      '<label>支払期限<select name="payTerm">' + PAY_TERMS.map(function (t) {
+        var v = t[0] + '-' + t[1];
+        return '<option value="' + v + '"' + (t[0] === payMonths(c) && t[1] === payDay(c) ? ' selected' : '') + '>' + t[2] + '</option>';
+      }).join('') + '</select></label>' +
+      '<label style="grid-column:1/-1">与信限度額（掛けで売ってよい上限。0なら確認しない）<input name="creditLimit" type="number" inputmode="numeric" min="0" value="' + (c.creditLimit || '') + '" placeholder="例：300000"></label></div>' +
       '<label>メモ<input name="note" value="' + esc(c.note) + '" autocomplete="off"></label>' +
       '</form>' +
       '<div class="modal-foot">' + (isNew || used ? '<button class="btn" data-act="cancel">キャンセル</button>' : '<button class="btn danger-outline" data-act="del">削除</button>') +
@@ -491,8 +589,15 @@
           c.tel = f.tel.value.trim();
           c.address = f.address.value.trim();
           c.closingDay = Number(f.closingDay.value);
+          c.code = f.code.value.trim();
+          c.kana = f.kana.value.trim();
+          c.honorific = f.honorific.value;
+          var pt = f.payTerm.value.split('-').map(Number);
+          c.payMonths = pt[0];
+          c.payDay = pt[1];
+          c.creditLimit = Math.floor(Number(f.creditLimit.value) || 0);
           if (modeOf(c) !== origMode && c.prices && Object.keys(c.prices).length &&
-            confirm('単価の扱いを変えました。この取引先で覚えている単価をリセットしますか？\n（リセットすると、次の伝票から商品マスタの卸単価を' + modeLabel(modeOf(c)) + 'に換算して使います）')) {
+            confirm('単価の扱いを変えました。この得意先で覚えている単価をリセットしますか？\n（リセットすると、次の伝票から商品マスタの卸単価を' + modeLabel(modeOf(c)) + 'に換算して使います）')) {
             c.prices = {};
           }
           c.note = f.note.value.trim();
@@ -518,16 +623,16 @@
   // ================= 入金 =================
   function openReceiptModal(presetId) {
     var customers = sortedCustomers().filter(function (c) { return c.payment === 'credit' || c.id === presetId; });
-    if (!customers.length) { alert('掛け売りの取引先がありません。'); return; }
+    if (!customers.length) { alert('掛け売りの得意先がありません。'); return; }
     var cid = presetId || customers[0].id;
     var method = 'transfer';
     POS.openModal(
       '<h3>入金を登録</h3>' +
       '<form class="form" id="rcForm" onsubmit="return false" style="margin-top:8px">' +
-      '<label>取引先<select name="customer">' + customers.map(function (c) {
+      '<label>得意先<select name="customer">' + customers.map(function (c) {
         return '<option value="' + c.id + '"' + (c.id === cid ? ' selected' : '') + '>' + esc(c.name) + '</option>';
       }).join('') + '</select></label>' +
-      '<p class="note" id="rcBal"></p>' +
+      '<p class="note" id="rcBal"></p><div class="btn-row" id="rcInv"></div>' +
       '<label>入金日<input type="date" name="date" value="' + today() + '"></label>' +
       '<label>金額<input type="number" inputmode="numeric" name="amount" min="1"></label>' +
       '<label>方法<div class="seg"><button type="button" class="btn small" data-m="transfer">振込</button>' +
@@ -538,9 +643,11 @@
         var b = e.target.closest('button');
         if (!b) return;
         if (b.dataset.m) { method = b.dataset.m; draw(); }
-        else if (b.dataset.act === 'cancel') POS.closeModal();
+        else if (b.dataset.fill) {
+          f.amount.value = b.dataset.fill;
+          if (!f.note.value) f.note.value = b.dataset.memo;
+        } else if (b.dataset.act === 'cancel') POS.closeModal();
         else if (b.dataset.act === 'save') {
-          var f = $('rcForm').elements;
           var amount = Math.floor(Number(f.amount.value) || 0);
           if (!(amount > 0)) { alert('金額を入力してください'); return; }
           var list = Store.getReceipts();
@@ -557,9 +664,17 @@
     f.customer.addEventListener('change', draw);
     function draw() {
       POS.modalBody.querySelectorAll('[data-m]').forEach(function (x) { x.classList.toggle('on', x.dataset.m === method); });
-      var bal = Calc.receivableBalance(f.customer.value, Store.getSlips(), Store.getReceipts());
-      $('rcBal').textContent = '現在の売掛残高：' + yen(bal);
+      var c = customerById(f.customer.value);
+      var sm = summaryOf(c);
+      $('rcBal').textContent = '現在の売掛残高：' + yen(sm.balance) + (sm.overdue ? '（うち期限切れ ' + yen(sm.overdue) + '）' : '');
+      // 未入金の請求書をタップすると、その残額が入る
+      $('rcInv').innerHTML = Store.getInvoices().filter(function (i) { return sm.invoices[i.id] && sm.invoices[i.id].remaining > 0; })
+        .map(function (i) {
+          return '<button type="button" class="btn small" data-fill="' + sm.invoices[i.id].remaining + '" data-memo="' + esc(i.periodTo.slice(0, 7).replace('-', '年') + '月締め分') + '">' +
+            i.periodTo.slice(5).replace('-', '/') + '締め 残' + yen(sm.invoices[i.id].remaining) + '</button>';
+        }).join('');
     }
+
     draw();
   }
 
@@ -568,7 +683,10 @@
     var inv0 = Calc.buildInvoice(c.id, periodTo, Store.getSlips(), Store.getReceipts(), Store.getInvoices(), round());
     if (!inv0.slipIds.length && !inv0.receiptIds.length && !inv0.carry) return null;
     var n = Store.makeNo('iseq');
-    var i = Object.assign({ id: Store.newId('I'), no: n.no, noLabel: n.noLabel, createdAt: new Date().toISOString(), issueDate: today(), customerName: c.name }, inv0);
+    var i = Object.assign({
+      id: Store.newId('I'), no: n.no, noLabel: n.noLabel, createdAt: new Date().toISOString(), issueDate: today(), customerName: c.name,
+      dueDate: Calc.dueDate(periodTo, payMonths(c), payDay(c))
+    }, inv0);
     var invs = Store.getInvoices();
     invs.push(i);
     Store.saveInvoices(invs);
@@ -583,12 +701,12 @@
 
   function openInvoiceModal(presetId) {
     var customers = sortedCustomers().filter(function (c) { return c.payment === 'credit'; });
-    if (!customers.length) { alert('掛け売りの取引先がありません。'); return; }
+    if (!customers.length) { alert('掛け売りの得意先がありません。'); return; }
     var cid = presetId || customers[0].id;
     POS.openModal(
       '<h3>請求書を作成</h3>' +
       '<form class="form" id="ivForm" onsubmit="return false" style="margin-top:8px">' +
-      '<label>取引先<select name="customer">' + customers.map(function (c) {
+      '<label>得意先<select name="customer">' + customers.map(function (c) {
         return '<option value="' + c.id + '"' + (c.id === cid ? ' selected' : '') + '>' + esc(c.name) + '（' + closingText(c) + '）</option>';
       }).join('') + '</select></label>' +
       '<label>締め日（この日までの納品・入金をまとめます）<input type="date" name="to"></label></form>' +
@@ -599,6 +717,7 @@
         if (!b) return;
         if (b.dataset.act === 'cancel') POS.closeModal();
         if (b.dataset.act === 'save') {
+          if (!checkInvoiceNo()) return;
           var i = createInvoice(customerById(f.customer.value), f.to.value);
           if (!i) { alert('請求する内容がありません'); return; }
           POS.closeModal();
@@ -628,16 +747,50 @@
     draw();
   }
 
+  /** ワンタップ：直近の締め日までの請求書を作って印刷（作成済みなら、その請求書を印刷） */
+  function oneTapInvoice(c) {
+    var to = Calc.lastClosingDate(today(), c.closingDay);
+    var x = Calc.buildInvoice(c.id, to, Store.getSlips(), Store.getReceipts(), Store.getInvoices(), round());
+    if (!x.slipIds.length) {
+      var done = Store.getInvoices().filter(function (i) { return i.customerId === c.id && i.periodTo === to; })[0];
+      if (done) { printInvoice(done); return; }
+      POS.toast(to + '締めで請求する納品はありません');
+      return;
+    }
+    if (!checkInvoiceNo()) return;
+    var i = createInvoice(c, to);
+    render();
+    POS.toast(c.name + ' の請求書（' + to + '締め）を発行しました');
+    printInvoice(i);
+  }
+
+  /** ワンタップ：請求書の残額を入金済にする（振込・今日） */
+  function markPaid(i) {
+    var st = Calc.invoiceStatus(i.customerId, Store.getInvoices(), Store.getReceipts(), today())[i.id];
+    if (!st || st.remaining <= 0) return;
+    if (!confirm(i.customerName + ' の ' + i.periodTo + '締め分 ' + yen(st.remaining) + ' を、今日の振込入金として登録しますか？')) return;
+    var list = Store.getReceipts();
+    list.push({ id: Store.newId('P'), customerId: i.customerId, date: today(), amount: st.remaining, method: 'transfer', note: i.periodTo.slice(0, 7).replace('-', '年') + '月締め分' });
+    Store.saveReceipts(list);
+    render();
+    POS.toast('入金を登録しました');
+  }
+
   function bulkInvoices() {
+    if (!pendingClosings().length) { alert('締め日を過ぎて、まだ請求していない得意先はありません。'); return; }
+    if (!checkInvoiceNo()) return;
     var made = [];
     sortedCustomers().forEach(function (c) {
       if (c.payment !== 'credit') return;
-      var i = createInvoice(c, Calc.lastClosingDate(today(), c.closingDay));
+      var to = Calc.lastClosingDate(today(), c.closingDay);
+      var x = Calc.buildInvoice(c.id, to, Store.getSlips(), Store.getReceipts(), Store.getInvoices(), round());
+      if (!x.slipIds.length) return; // 新しい納品がない得意先は作らない
+      var i = createInvoice(c, to);
       if (i) made.push(i);
     });
     tab = 'billing';
     render();
-    if (!made.length) { alert('締め日を過ぎて、まだ請求していない取引先はありません。'); return; }
+    if (!made.length) { alert('締め日を過ぎて、まだ請求していない得意先はありません。'); return; }
     POS.toast(made.length + '件の請求書を作成しました');
     printInvoices(made);
   }
@@ -653,6 +806,99 @@
     Store.saveReceipts(rcs);
     render();
     POS.toast('請求書を取り消しました');
+  }
+
+  // ================= 得意先元帳 =================
+  var KIND = { delivery: '納品', invoice: '請求', receipt: '入金' };
+  function ledgerRows(c, from, to) {
+    var rows = Calc.customerLedger(c.id, Store.getSlips(), Store.getReceipts(), Store.getInvoices());
+    var opening = 0;
+    rows.forEach(function (r) { if (r.date < from) opening = r.balance; });
+    return { opening: opening, rows: rows.filter(function (r) { return r.date >= from && r.date <= to; }) };
+  }
+  function ledgerDesc(r) {
+    var x = r.item;
+    if (r.kind === 'delivery') return x.lines.map(function (l) { return l.name + ' ' + qtyText(l); }).join('、');
+    if (r.kind === 'invoice') {
+      var m = x.periodTo.split('-').map(Number);
+      var d = x.dueDate ? x.dueDate.split('-').map(Number) : null;
+      return m[1] + '/' + m[2] + '締め 請求 ' + yen(x.billed) + (d ? '・期限 ' + d[1] + '/' + d[2] : '');
+    }
+    return METHOD[x.method] + (x.note ? '・' + x.note : '');
+  }
+  function ledgerRef(r) { return r.kind === 'receipt' ? '' : noOf(r.item); }
+
+  function openLedger(c) {
+    if (!c) return;
+    var t = today();
+    var p = t.split('-').map(Number);
+    var from = POS.localDate(new Date(p[0], p[1] - 3, 1)); // 2か月前の1日から
+    var to = t;
+    POS.openModal('<div id="lgBody"></div>', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.act === 'close') POS.closeModal();
+      else if (b.dataset.act === 'print') printLedger(c, from, to);
+      else if (b.dataset.act === 'csv') ledgerCsv(c, from, to);
+    });
+    POS.modalBody.onchange = function (e) {
+      if (e.target.name === 'from') from = e.target.value || from;
+      if (e.target.name === 'to') to = e.target.value || to;
+      draw();
+    };
+    function draw() {
+      var L = ledgerRows(c, from, to);
+      var sm = summaryOf(c);
+      $('lgBody').innerHTML = '<h3>得意先元帳：' + esc(c.name) + '</h3>' +
+        '<div class="sub">' + closingText(c) + '・売掛残 <b>' + yen(sm.balance) + '</b>' +
+        (sm.overdue ? '・<b class="neg">期限切れ ' + yen(sm.overdue) + '</b>' : '') + '</div>' +
+        '<div class="toolbar"><input type="date" name="from" value="' + from + '"> 〜 <input type="date" name="to" value="' + to + '"></div>' +
+        '<div class="table-wrap"><table><thead><tr><th>日付</th><th>区分</th><th>No</th><th>内容</th><th class="r">売上</th><th class="r">入金</th><th class="r">残高</th></tr></thead><tbody>' +
+        '<tr><td colspan="6">前期繰越</td><td class="r num">' + yen(L.opening) + '</td></tr>' +
+        L.rows.map(function (r) {
+          return '<tr><td>' + r.date.slice(5).replace('-', '/') + '</td><td>' + KIND[r.kind] + '</td><td>' + esc(ledgerRef(r)) + '</td>' +
+            '<td style="white-space:normal;min-width:160px">' + esc(ledgerDesc(r)) + '</td>' +
+            '<td class="r num">' + (r.debit ? yen(r.debit) : '') + '</td><td class="r num">' + (r.credit ? yen(r.credit) : '') + '</td>' +
+            '<td class="r num">' + (r.kind === 'invoice' ? '' : yen(r.balance)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="modal-foot" style="grid-template-columns:1fr 1fr 1fr"><button class="btn" data-act="csv">CSV出力</button>' +
+        '<button class="btn" data-act="print">取引明細書を印刷</button><button class="btn primary" data-act="close">閉じる</button></div>';
+    }
+    draw();
+  }
+
+  function printLedger(c, from, to) {
+    var L = ledgerRows(c, from, to);
+    var sales = 0;
+    var paid = 0;
+    L.rows.forEach(function (r) { sales += r.debit; paid += r.credit; });
+    var end = L.opening + sales - paid;
+    var h = '<h1>お取引明細書</h1>' +
+      '<div class="head"><div><div class="to">' + esc(c.name) + '　' + honor(c) + '</div>' +
+      '<p>' + jpDate(from) + '〜' + jpDate(to) + 'のお取引の明細です。</p>' +
+      '<div>期末残高<span class="big-total">' + yen(end) + '</span></div></div>' +
+      '<div><div class="meta">発行日 ' + jpDate(today()) + '</div>' + fromBlock() + '</div></div>' +
+      '<table class="summary"><thead><tr><th>前期繰越</th><th>お買上額（税込）</th><th>御入金額</th><th>期末残高</th></tr></thead>' +
+      '<tbody><tr><td>' + yen(L.opening) + '</td><td>' + yen(sales) + '</td><td>' + yen(paid) + '</td><td><b>' + yen(end) + '</b></td></tr></tbody></table>' +
+      '<table><thead><tr><th>日付</th><th>区分</th><th>No</th><th>内容</th><th>お買上</th><th>御入金</th><th>残高</th></tr></thead><tbody>' +
+      L.rows.filter(function (r) { return r.kind !== 'invoice'; }).map(function (r) {
+        return '<tr><td>' + r.date.slice(5).replace('-', '/') + '</td><td>' + KIND[r.kind] + '</td><td>' + esc(ledgerRef(r)) + '</td><td>' + esc(ledgerDesc(r)) + '</td>' +
+          '<td class="r">' + (r.debit ? yen(r.debit) : '') + '</td><td class="r">' + (r.credit ? yen(r.credit) : '') + '</td><td class="r">' + yen(r.balance) + '</td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<div class="notes">金額は税込です。' + (settings().bankInfo ? '<br>お振込先：' + esc(settings().bankInfo).replace(/\n/g, '<br>') : '') + '</div>';
+    POS.printDoc(h);
+  }
+
+  function ledgerCsv(c, from, to) {
+    var L = ledgerRows(c, from, to);
+    var rows = [['日付', '区分', 'No', '内容', '売上(税込)', '入金', '残高'], [from, '前期繰越', '', '', '', '', L.opening]];
+    L.rows.forEach(function (r) {
+      rows.push([r.date, KIND[r.kind], ledgerRef(r), ledgerDesc(r), r.debit || '', r.credit || '', r.kind === 'invoice' ? '' : r.balance]);
+    });
+    var csv = '\ufeff' + rows.map(function (r) {
+      return r.map(function (v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',');
+    }).join('\r\n');
+    POS.saveFile('nikupos-ledger-' + (c.code || c.name) + '-' + from + '_' + to + '.csv', csv, 'text/csv');
   }
 
   // ================= 帳票（A4） =================
@@ -691,7 +937,7 @@
     var c = customerById(s.customerId);
     var isOrder = s.status === 'order';
     var h = '<h1>' + (isOrder ? '御注文控' : '納品書') + '</h1>' +
-      '<div class="head"><div><div class="to">' + esc(c ? c.name : s.customerName) + '　御中</div>' +
+      '<div class="head"><div><div class="to">' + esc(c ? c.name : s.customerName) + '　' + honor(c) + '</div>' +
       '<p>' + (isOrder ? '下記のとおりご注文を承りました。' : '下記のとおり納品いたします。') + '</p>' +
       '<div>合計金額（税込）<span class="big-total">' + yen(s.totals.total) + '</span></div></div>' +
       '<div><div class="meta">No. ' + noOf(s) + '<br>' + (isOrder ? '納品予定日 ' : '納品日 ') + jpDate(s.date) + '</div>' + fromBlock() + '</div></div>' +
@@ -701,7 +947,8 @@
       '<tr><th>' + (modeOf(s) === 'incl' ? '消費税合計' : '小計（税抜）') + '</th><td>' + yen(modeOf(s) === 'incl' ? s.totals.tax : s.totals.subtotal) +
       '</td><th>合計（税込）</th><td><b>' + yen(s.totals.total) + '</b></td></tr></tbody></table>' +
       '<div class="notes">※は軽減税率（8%）対象商品です。<br>お支払い：' + (s.payment === 'cash' ? '現金（納品時）' : (c ? closingText(c).replace(/・税込単価$/, '') : '掛け')) +
-      (s.note ? '<br>備考：' + esc(s.note) : '') + '</div>';
+      (s.note ? '<br>備考：' + esc(s.note) : '') + '</div>' +
+      (isOrder ? '' : '<table style="width:45mm;margin:6mm 0 0 auto"><tbody><tr><th>受領印</th></tr><tr><td style="height:22mm"></td></tr></tbody></table>');
     return h;
   }
   function printSlip(s) { POS.printDoc(slipDocHtml(s)); }
@@ -713,9 +960,10 @@
     var st = settings();
     var mode = modeOf(c);
     var h = '<h1>請求書</h1>' +
-      '<div class="head"><div><div class="to">' + esc(c ? c.name : i.customerName) + '　御中</div>' +
+      '<div class="head"><div><div class="to">' + esc(c ? c.name : i.customerName) + '　' + honor(c) + '</div>' +
       '<p>' + jpDate(i.periodTo) + '締め分を下記のとおりご請求申し上げます。</p>' +
-      '<div>今回御請求額<span class="big-total">' + yen(i.billed) + '</span></div></div>' +
+      '<div>今回御請求額<span class="big-total">' + yen(i.billed) + '</span></div>' +
+      (i.dueDate ? '<div>お支払期限　<b>' + jpDate(i.dueDate) + '</b></div>' : '') + '</div>' +
       '<div><div class="meta">請求書No. ' + noOf(i) + '<br>発行日 ' + jpDate(i.issueDate) + '</div>' + fromBlock() + '</div></div>' +
       '<table class="summary"><thead><tr><th>前回御請求額</th><th>御入金額</th><th>繰越金額</th><th>今回お買上額（税抜）</th><th>消費税額</th><th>今回御請求額</th></tr></thead>' +
       '<tbody><tr><td>' + yen(i.prevBilled) + '</td><td>' + yen(i.received) + '</td><td>' + yen(i.carry) + '</td><td>' + yen(i.subtotal) +
@@ -738,7 +986,7 @@
   // ================= CSV =================
   function exportMonthCsv() {
     var ym = wsDate.slice(0, 7);
-    var rows = [['納品日', '伝票No', '状態', '取引先', '支払', '商品', '税率', '数量', '単位', '税抜/税込', '単価', '金額', '伝票合計(税込)', '請求書']];
+    var rows = [['納品日', '伝票No', '状態', '得意先', '支払', '商品', '税率', '数量', '単位', '税抜/税込', '単価', '金額', '伝票合計(税込)', '請求書']];
     Store.getSlips().filter(function (s) { return s.date.slice(0, 7) === ym; })
       .sort(function (a, b) { return a.date.localeCompare(b.date) || a.no - b.no; })
       .forEach(function (s) {
