@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#b8452a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NIKUPOS">
+  <meta name="format-detection" content="telephone=no">
+  <title>NIKUPOS</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="logo">🐔</span><span id="storeName">NIKUPOS</span></div>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-view="register">レジ</button>
+        <button class="tab" data-view="sales">売上</button>
+        <button class="tab" data-view="products">商品</button>
+        <button class="tab" data-view="settings">設定</button>
+      </nav>
+      <div class="clock" id="clock"></div>
+    </header>
+
+    <!-- レジ -->
+    <main id="view-register" class="view active">
+      <section class="catalog">
+        <div class="cat-tabs" id="catTabs"></div>
+        <div class="product-grid" id="productGrid"></div>
+      </section>
+      <aside class="cart" id="cartPanel">
+        <div class="cart-head">
+          <h2>お会計</h2>
+          <button class="btn ghost small" id="btnCloseCart" aria-label="閉じる">閉じる ▼</button>
+        </div>
+        <ul class="cart-lines" id="cartLines"></ul>
+        <div class="cart-sum" id="cartSum"></div>
+        <div class="cart-actions">
+          <button class="btn" id="btnTxDiscount">小計値引き</button>
+          <button class="btn danger-outline" id="btnClearCart">全取消</button>
+          <button class="btn primary big" id="btnPay">会計</button>
+        </div>
+      </aside>
+      <!-- スマホ用の下部バー -->
+      <div class="mini-cart" id="miniCart">
+        <button class="mini-info" id="btnOpenCart">
+          <span id="miniCount">0点</span>
+          <strong id="miniTotal">¥0</strong>
+          <span class="mini-open">カートを見る ▲</span>
+        </button>
+        <button class="btn primary" id="btnPayMini">会計</button>
+      </div>
+    </main>
+
+    <!-- 売上 -->
+    <main id="view-sales" class="view">
+      <div class="page">
+        <div class="toolbar">
+          <button class="btn small" id="btnPrevDay">◀</button>
+          <input type="date" id="salesDate">
+          <button class="btn small" id="btnNextDay">▶</button>
+          <span class="spacer"></span>
+          <button class="btn small" id="btnPrintReport">精算レポート印刷</button>
+          <button class="btn small" id="btnExportCsv">CSV出力</button>
+        </div>
+        <div id="salesSummary"></div>
+      </div>
+    </main>
+
+    <!-- 商品 -->
+    <main id="view-products" class="view">
+      <div class="page">
+        <div class="toolbar">
+          <h2>商品マスタ</h2>
+          <span class="spacer"></span>
+          <button class="btn primary small" id="btnAddProduct">＋ 商品を追加</button>
+        </div>
+        <div id="productList"></div>
+      </div>
+    </main>
+
+    <!-- 設定 -->
+    <main id="view-settings" class="view">
+      <div class="page">
+        <h2>店舗・レシート設定</h2>
+        <form id="settingsForm" class="form">
+          <label>店名<input name="storeName" autocomplete="off"></label>
+          <label>住所<input name="address" autocomplete="off"></label>
+          <label>電話番号<input name="tel" inputmode="tel" autocomplete="off"></label>
+          <label>インボイス登録番号<input name="invoiceNo" placeholder="T1234567890123" autocomplete="off"></label>
+          <label>レシート末尾メッセージ<textarea name="footer" rows="2"></textarea></label>
+          <label>商品カテゴリ（カンマ区切り）<input name="categories" autocomplete="off"></label>
+          <label>グラム売りの端数処理
+            <select name="rounding">
+              <option value="floor">切り捨て</option>
+              <option value="round">四捨五入</option>
+              <option value="ceil">切り上げ</option>
+            </select>
+          </label>
+          <label>レシート用紙幅
+            <select name="paperWidth">
+              <option value="58">58mm</option>
+              <option value="80">80mm</option>
+              <option value="a4">A4などの普通紙</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" name="autoPrint"> 会計後に自動でレシート印刷画面を開く</label>
+          <button class="btn primary" type="submit">保存</button>
+        </form>
+
+        <h2>データ管理</h2>
+        <p class="note" id="storageNote"></p>
+        <div class="btn-row">
+          <button class="btn" id="btnBackup">バックアップを保存</button>
+          <label class="btn">バックアップから復元<input type="file" id="fileRestore" accept="application/json,.json" hidden></label>
+          <button class="btn danger-outline" id="btnPurge">古い売上を削除…</button>
+        </div>
+        <p class="note">データはこの端末のブラウザ内にだけ保存されます。定期的にバックアップを保存してください。</p>
+        <p class="note" id="installNote"></p>
+      </div>
+    </main>
+  </div>
+
+  <!-- モーダル -->
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <!-- 印刷用 -->
+  <div id="printArea"></div>
+
+  <script src="js/calc.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
