@@ -99,6 +99,7 @@
 
     var tr = POS.trackedMap();
     var moves = allMoves().filter(function (m) { return tr[m.productId]; }).slice(-30).reverse();
+    h += ordersHtml();
     h += '<h2>最近の入出庫</h2>';
     h += moves.length ? movesTable(moves, true) : '<p class="note">まだ記録がありません。入荷や棚卸をすると、ここに表示されます。店頭販売の分は、売上データから自動で在庫を減らします（ここには表示しません）。</p>';
     $('invRoot').innerHTML = h;
@@ -143,7 +144,8 @@
       var act = b.dataset.inv;
       if (act === 'pick') openPickModal();
       else if (!tracked().length) alert('先に「管理する商品を選ぶ」で、在庫を管理する商品を選んでください。');
-      else if (act === 'in') openItemsModal('in');
+      else if (act === 'in') openItemsModal();
+      else if (act === 'order') openOrderModal();
       else if (act === 'process') openProcessModal();
       else if (act === 'waste') openWasteModal();
       else if (act === 'count') openCountModal();
@@ -189,8 +191,10 @@
   }
 
   // ---------- 入荷 ----------
-  function openItemsModal() {
-    var items = [];
+  /** prefill: { supplier, note, items, onSaved }（発注書から入荷するとき） */
+  function openItemsModal(prefill) {
+    prefill = prefill || {};
+    var items = (prefill.items || []).slice();
     var list = tracked();
     var suppliers = {};
     Store.getMoves().forEach(function (m) { if (m.type === 'in' && m.supplier) suppliers[m.supplier] = true; });
@@ -198,11 +202,11 @@
       '<h3>入荷</h3><div class="sub">仕入れた商品と数量を入れてください（重さは kg、例：12.5）</div>' +
       '<form class="form" id="iForm" onsubmit="return false">' +
       '<label>入荷日<input type="date" name="date" value="' + POS.localDate(new Date()) + '"></label>' +
-      '<label>仕入先<input name="supplier" list="supplierList" autocomplete="off"><datalist id="supplierList">' +
+      '<label>仕入先<input name="supplier" list="supplierList" value="' + esc(prefill.supplier || '') + '" autocomplete="off"><datalist id="supplierList">' +
       Object.keys(suppliers).map(function (s) { return '<option value="' + esc(s) + '">'; }).join('') + '</datalist></label>' +
       '<div><div class="wsline-head"><span>商品</span><span>数量</span><span>仕入単価(税抜)</span><span></span></div><div id="iItems"></div>' +
       '<div class="radd"><select id="iSel">' + productOptions(list) + '</select><button type="button" class="btn" data-act="add">＋ 追加</button></div></div>' +
-      '<label>メモ<input name="note" autocomplete="off"></label></form>' +
+      '<label>メモ<input name="note" value="' + esc(prefill.note || '') + '" autocomplete="off"></label></form>' +
       '<div class="modal-foot"><button class="btn" data-act="cancel">キャンセル</button><button class="btn primary" data-act="save">入荷を記録</button></div>',
       function (e) {
         var b = e.target.closest('button');
@@ -255,6 +259,7 @@
       });
       POS.saveProducts();
       POS.closeModal();
+      if (prefill.onSaved) prefill.onSaved();
       render();
       POS.toast(lines.length + '品目の入荷を記録しました');
     }
@@ -440,5 +445,180 @@
   }
 
   // 卸の画面からも使う
+  // ---------- 発注書 ----------
+  function knownSuppliers() {
+    var s = {};
+    POS.products().forEach(function (p) { if (p.supplier) s[p.supplier] = true; });
+    Store.getMoves().forEach(function (m) { if (m.type === 'in' && m.supplier) s[m.supplier] = true; });
+    Store.getOrders().forEach(function (o) { if (o.supplier) s[o.supplier] = true; });
+    return Object.keys(s);
+  }
+  function onOrder() {
+    var a = {};
+    Store.getOrders().forEach(function (o) {
+      if (o.status !== 'open') return;
+      o.lines.forEach(function (l) { a[l.productId] = (a[l.productId] || 0) + l.qty; });
+    });
+    return a;
+  }
+  function suggestions() {
+    var today = POS.localDate(new Date());
+    return Calc.suggestOrder(tracked(), Store.getStock(), Calc.allocated(Store.getReservations(), Store.getSlips(), today), onOrder());
+  }
+  function ordersHtml() {
+    var open = Store.getOrders().filter(function (o) { return o.status === 'open'; }).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
+    var sug = suggestions();
+    var h = '<h2>発注</h2>';
+    if (sug.length) {
+      h += '<div class="list-item" style="border-left:6px solid #d9a441"><div class="li-top"><span class="li-title">発注点を下回っている商品が ' + sug.length + '品目あります</span></div>' +
+        '<div class="li-sub">' + sug.map(function (x) { return esc(x.name) + ' ' + fmtQty(x.unit, x.qty); }).join('、') + '</div>' +
+        '<div class="btn-row"><button class="btn primary" data-inv="order">発注書を作る</button></div></div>';
+    } else {
+      h += '<div class="btn-row"><button class="btn" data-inv="order">発注書を作る</button></div>';
+    }
+    h += open.length ? open.map(function (o) {
+      return '<div class="list-item"><div class="li-top"><span class="li-title">' + esc(o.supplier || '仕入先未入力') + '</span>' +
+        '<span class="pill warn">発注済・未入荷</span><span class="li-sub">No.' + esc(o.noLabel || o.no) + '・' + o.date + ' 発注' + (o.deliveryDate ? '・' + o.deliveryDate + ' 納品希望' : '') + '</span></div>' +
+        '<div class="li-sub">' + o.lines.map(function (l) { return esc(l.name) + ' ' + fmtQty(l.unit, l.qty); }).join('、') + '</div>' +
+        '<div class="btn-row"><button class="btn primary" data-ord="receive" data-id="' + o.id + '">入荷として記録</button>' +
+        '<button class="btn" data-ord="print" data-id="' + o.id + '">発注書を印刷</button>' +
+        '<button class="btn" data-ord="share" data-id="' + o.id + '">文章で送る</button>' +
+        '<button class="btn danger-outline" data-ord="cancel" data-id="' + o.id + '">取消</button></div></div>';
+    }).join('') : '<p class="note">未入荷の発注はありません。</p>';
+    return h;
+  }
+
+  function openOrderModal() {
+    var sug = suggestions();
+    var sups = knownSuppliers();
+    var supplier = sug.length && sug[0].supplier ? sug[0].supplier : (sups[0] || '');
+    var items = [];
+    function fillFor(sup) {
+      items = sug.filter(function (x) { return !sup || !x.supplier || x.supplier === sup; }).map(function (x) {
+        return { productId: x.productId, name: x.name, unit: x.unit, qtyText: qtyInputValue(x.unit, x.qty) };
+      });
+    }
+    fillFor(supplier);
+    var t = new Date();
+    var tomorrow = POS.localDate(new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1));
+    POS.openModal(
+      '<h3>発注書を作る</h3><div class="sub">発注点を下回っている商品を、適正在庫まで発注する量で入れてあります（重さは kg）。</div>' +
+      '<form class="form" id="oForm" onsubmit="return false">' +
+      '<label>仕入先<input name="supplier" list="oSupList" value="' + esc(supplier) + '" autocomplete="off"><datalist id="oSupList">' +
+      sups.map(function (s) { return '<option value="' + esc(s) + '">'; }).join('') + '</datalist></label>' +
+      '<label>納品希望日<input type="date" name="delivery" value="' + tomorrow + '"></label>' +
+      '<div><div id="oItems"></div><div class="radd"><select id="oSel">' + productOptions(tracked()) + '</select><button type="button" class="btn" data-act="add">＋ 追加</button></div></div>' +
+      '<label>連絡事項<input name="note" autocomplete="off" placeholder="例：午前中に納品をお願いします"></label></form>' +
+      '<div class="modal-foot"><button class="btn" data-act="cancel">キャンセル</button><button class="btn primary" data-act="save">発注書を保存して印刷</button></div>',
+      function (e) {
+        var b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.act === 'add') {
+          var p = productById($('oSel').value);
+          items.push({ productId: p.id, name: p.name, unit: p.unit, qtyText: '' });
+          draw();
+        } else if (b.dataset.del != null) { items.splice(Number(b.dataset.del), 1); draw(); }
+        else if (b.dataset.act === 'cancel') POS.closeModal();
+        else if (b.dataset.act === 'save') save();
+      },
+      false
+    );
+    var f = $('oForm').elements;
+    f.supplier.addEventListener('change', function () { fillFor(f.supplier.value.trim()); draw(); });
+    POS.modalBody.oninput = function (e) { var i = e.target.dataset.i; if (i != null) items[i].qtyText = e.target.value; };
+    function draw() {
+      $('oItems').innerHTML = items.length ? items.map(function (it, i) {
+        var stock = Store.getStock()[it.productId] || 0;
+        return '<div class="ritem"><div class="rname">' + esc(it.name) + '<small>在庫 ' + fmtQty(it.unit, stock) + '・' + unitHint(it.unit) + '</small></div>' +
+          '<input type="text" inputmode="decimal" data-i="' + i + '" value="' + esc(it.qtyText) + '" placeholder="' + unitHint(it.unit) + '">' +
+          '<button type="button" data-del="' + i + '">×</button></div>';
+      }).join('') : '<p class="note">下で商品を選んで「追加」</p>';
+    }
+    function save() {
+      if (!items.length) { alert('商品を追加してください'); return; }
+      var lines = [];
+      for (var i = 0; i < items.length; i++) {
+        var q = parseQty(items[i].qtyText, items[i].unit);
+        if (!(q > 0)) { alert('「' + items[i].name + '」の数量を入れてください'); return; }
+        lines.push({ productId: items[i].productId, name: items[i].name, unit: items[i].unit, qty: q });
+      }
+      var n = Store.makeNo('oseq');
+      var o = {
+        id: Store.newId('O'), no: n.no, noLabel: n.noLabel, createdAt: new Date().toISOString(), date: POS.localDate(new Date()),
+        supplier: f.supplier.value.trim(), deliveryDate: f.delivery.value, note: f.note.value.trim(), lines: lines, status: 'open', staff: POS.staffName()
+      };
+      var list = Store.getOrders();
+      list.push(o);
+      Store.saveOrders(list);
+      POS.log('order', '発注 No.' + o.noLabel + ' ' + (o.supplier || '') + ' ' + lines.length + '品目');
+      POS.closeModal();
+      render();
+      printOrder(o);
+    }
+    draw();
+  }
+
+  function orderText(o) {
+    var st = POS.settings();
+    return (o.supplier ? o.supplier + ' 様\n' : '') + 'いつもお世話になっております。' + st.storeName + 'です。\n下記の発注をお願いいたします。\n\n' +
+      o.lines.map(function (l) { return '・' + l.name + '　' + fmtQty(l.unit, l.qty); }).join('\n') +
+      (o.deliveryDate ? '\n\n納品希望日：' + o.deliveryDate : '') + (o.note ? '\n' + o.note : '') +
+      '\n\n' + st.storeName + (st.tel ? '　TEL ' + st.tel : '') + '\n（発注No.' + (o.noLabel || o.no) + '）';
+  }
+  function printOrder(o) {
+    var st = POS.settings();
+    POS.printDoc('<h1>発注書</h1><div class="head"><div><div class="to">' + esc(o.supplier || '') + '　御中</div>' +
+      '<p>下記のとおり発注いたします。</p>' + (o.deliveryDate ? '<div>納品希望日　<b>' + o.deliveryDate.replace(/-/g, '/') + '</b></div>' : '') + '</div>' +
+      '<div><div class="meta">発注No. ' + esc(o.noLabel || o.no) + '<br>発注日 ' + o.date.replace(/-/g, '/') + '</div>' +
+      '<div class="from"><div class="name">' + esc(st.storeName) + '</div>' + (st.address ? esc(st.address) + '<br>' : '') + (st.tel ? 'TEL ' + esc(st.tel) : '') + '</div></div></div>' +
+      '<table><thead><tr><th>品名</th><th>数量</th><th>備考</th></tr></thead><tbody>' +
+      o.lines.map(function (l) { return '<tr><td>' + esc(l.name) + '</td><td class="r">' + fmtQty(l.unit, l.qty) + '</td><td></td></tr>'; }).join('') +
+      '</tbody></table>' + (o.note ? '<div class="notes">連絡事項：' + esc(o.note) + '</div>' : ''));
+  }
+  function shareOrder(o) {
+    var text = orderText(o);
+    if (navigator.share) {
+      navigator.share({ text: text, title: '発注書' }).catch(function () {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function () { POS.toast('発注の文章をコピーしました。LINEやメールに貼り付けてください'); }, function () { prompt('この文章をコピーしてください', text); });
+    } else prompt('この文章をコピーしてください', text);
+  }
+
+  $('invRoot').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-ord]');
+    if (!b) return;
+    var list = Store.getOrders();
+    var o = list.find(function (x) { return x.id === b.dataset.id; });
+    if (!o) return;
+    var act = b.dataset.ord;
+    if (act === 'print') printOrder(o);
+    if (act === 'share') shareOrder(o);
+    if (act === 'cancel') {
+      if (!confirm('発注 No.' + (o.noLabel || o.no) + ' を取り消しますか？')) return;
+      o.status = 'cancelled';
+      Store.saveOrders(list);
+      POS.log('order', '発注 No.' + (o.noLabel || o.no) + ' を取消');
+      render();
+    }
+    if (act === 'receive') {
+      openItemsModal({
+        supplier: o.supplier,
+        note: '発注No.' + (o.noLabel || o.no),
+        items: o.lines.map(function (l) {
+          var p = productById(l.productId);
+          return { productId: l.productId, name: l.name, unit: l.unit, qtyText: qtyInputValue(l.unit, l.qty), cost: (p && p.cost) || '' };
+        }),
+        onSaved: function () {
+          var l2 = Store.getOrders();
+          var x = l2.find(function (y) { return y.id === o.id; });
+          x.status = 'received';
+          x.receivedAt = new Date().toISOString();
+          Store.saveOrders(l2);
+          render();
+        }
+      });
+    }
+  });
+
   POS.inv = { fmtQty: fmtQty, parseQty: parseQty, qtyInputValue: qtyInputValue, unitHint: unitHint, render: render };
 });

@@ -23,11 +23,13 @@
   }
 
   /** 行の値引き額 */
+  /** 行の値引き額（手動の値引き ＋ タイムセール・まとめ売りの値引き） */
   function lineDiscount(line, mode) {
     var base = lineBase(line, mode);
     var d = line.discount;
-    if (!d || !d.value) return 0;
-    var amount = d.type === 'pct' ? roundBy((base * d.value) / 100, mode) : d.value;
+    var amount = 0;
+    if (d && d.value) amount = d.type === 'pct' ? roundBy((base * d.value) / 100, mode) : d.value;
+    amount += line.promoDiscount || 0;
     return Math.max(0, Math.min(base, amount));
   }
 
@@ -148,12 +150,18 @@
       sales: daySales, count: 0, total: 0, cash: 0, cashless: 0, depositUsed: 0, discount: 0, voids: 0,
       rates: {}, items: {},
       depositIn: { cash: 0, cashless: 0 }, depositRefund: { cash: 0, cashless: 0 }, drawerCash: 0,
-      wholesale: { count: 0, total: 0, credit: 0, cashOnDelivery: 0, receiptCash: 0, receiptOther: 0, fee: 0 }
+      wholesale: { count: 0, total: 0, credit: 0, cashOnDelivery: 0, receiptCash: 0, receiptOther: 0, fee: 0 },
+      cashlessBy: {}, returns: { count: 0, amount: 0 }, cashIn: 0, cashOut: 0
     };
     daySales.forEach(function (s) {
       if (s.void) { sum.voids++; return; }
       var p = salePayments(s);
-      sum.count++;
+      if (p.cashless) {
+        var ct = s.cashlessType || 'キャッシュレス';
+        sum.cashlessBy[ct] = (sum.cashlessBy[ct] || 0) + p.cashless;
+      }
+      if (s.kind === 'return') { sum.returns.count++; sum.returns.amount -= s.totals.total; } // 返品はマイナスの取引
+      else sum.count++;
       sum.total += s.totals.total;
       sum.cash += p.cash;
       sum.cashless += p.cashless;
@@ -166,9 +174,9 @@
       });
       s.lines.forEach(function (l) {
         var it = sum.items[l.name] || (sum.items[l.name] = { name: l.name, unit: l.unit, qty: 0, count: 0, amount: 0 });
-        it.qty += l.unit === 'open' ? 1 : l.qty;
-        it.count += 1;
-        it.amount += l.amount;
+        it.qty += l.unit === 'open' ? (s.kind === 'return' ? -1 : 1) : l.qty;
+        if (s.kind !== 'return') it.count += 1;
+        it.amount += l.itemAmount != null ? l.itemAmount : l.amount; // 返品は小計値引き前の金額で差し引く
       });
     });
     (reservations || []).forEach(function (r) {
@@ -192,8 +200,242 @@
         else w.receiptOther += r.amount;
       });
     }
-    sum.drawerCash = sum.cash + sum.depositIn.cash - sum.depositRefund.cash + w.cashOnDelivery + w.receiptCash;
+    if (ws) {
+      (ws.cashmoves || []).forEach(function (m) {
+        if (m.date !== date) return;
+        if (m.kind === 'in') sum.cashIn += m.amount;
+        else if (m.kind === 'out') sum.cashOut += m.amount;
+      });
+    }
+    sum.drawerCash = sum.cash + sum.depositIn.cash - sum.depositRefund.cash + w.cashOnDelivery + w.receiptCash + sum.cashIn - sum.cashOut;
     return sum;
+  }
+
+  // ================= レジ締め（端末ごと） =================
+  var DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
+  /** 金種ごとの枚数 → 合計 */
+  function countCash(den) {
+    return DENOMS.reduce(function (s, d) { return s + d * (Number(den && den[d]) || 0); }, 0);
+  }
+  function devOf(x, key) { return (x && x[key || 'dev']) || ''; }
+  /**
+   * その端末のレジの理論在高（あるべき現金）
+   * 釣銭準備金 ＋ 現金売上（返品・返金を含む）＋ 前受金の受取 − 返金 ＋ 卸の現金回収 ＋ 入金 − 出金
+   * @param dev 端末の記号（null ならすべての端末）
+   */
+  function drawerSummary(data, date, dev) {
+    function mine(x, key) { return dev == null || devOf(x, key) === dev; }
+    var sales = (data.sales || []).filter(function (s) { return mine(s); });
+    var res = (data.reservations || []).map(function (r) {
+      var x = { deposit: r.deposit, depositMethod: r.depositMethod };
+      if (mine(r, 'depositDev')) x.depositDate = r.depositDate;
+      if (mine(r, 'refundDev')) x.depositRefundDate = r.depositRefundDate;
+      return x;
+    });
+    var ws = {
+      slips: (data.slips || []).filter(function (s) { return s.payment === 'cash' && mine(s, 'deliveredDev'); }),
+      receipts: (data.receipts || []).filter(function (r) { return mine(r); }),
+      cashmoves: (data.cashmoves || []).filter(function (m) { return mine(m); })
+    };
+    var sum = summarizeDay(sales, res, date, ws);
+    var float = 0;
+    ws.cashmoves.forEach(function (m) { if (m.date === date && m.kind === 'float') float = m.amount; });
+    return { sum: sum, float: float, expected: float + sum.drawerCash };
+  }
+
+  // ================= 一部返品 =================
+  /**
+   * 返品の返金額
+   * @param sale 元の取引
+   * @param sel { 行番号: 返品する数量（g または 個） }
+   * @returns { lines: [{ idx, ..., qty, amount }], byRate, total } 金額はプラス
+   */
+  function returnAmount(sale, sel, mode) {
+    var returned = sale.returned || {};
+    var t = sale.totals;
+    var factor = t.subtotal ? t.total / t.subtotal : 1; // 小計値引きの按分
+    var lines = [];
+    var allBack = true;
+    sale.lines.forEach(function (l, i) {
+      var left = l.qty - (returned[i] || 0);
+      var r = Math.min(left, Number(sel[i]) || 0);
+      if (r < left) allBack = false;
+      if (!(r > 0)) return;
+      // base：小計値引き前の金額（商品別の集計用）。残りを全部返すときは、残りちょうど
+      var base = r === left ? l.amount - Math.round((l.amount * (returned[i] || 0)) / l.qty) : Math.round((l.amount * r) / l.qty);
+      lines.push({
+        idx: i, productId: l.productId, name: l.name, unit: l.unit, price: l.price, taxRate: l.taxRate, qty: r,
+        base: base, amount: Math.round(base * factor)
+      });
+    });
+    var remain = t.total - (sale.refunded || 0);
+    var total = lines.reduce(function (s, l) { return s + l.amount; }, 0);
+    if (allBack && lines.length) {
+      // 残りを全部返品するときは、残額ちょうどを返金（端数のずれを残さない）
+      var diff = remain - total;
+      lines[lines.length - 1].amount += diff;
+      total = remain;
+    }
+    total = Math.min(total, remain);
+    var g = {};
+    lines.forEach(function (l) { g[l.taxRate] = (g[l.taxRate] || 0) + l.amount; });
+    var byRate = Object.keys(g).map(Number).sort(function (a, b) { return a - b; }).map(function (rate) {
+      return { rate: rate, amount: g[rate], tax: includedTax(g[rate], rate) };
+    });
+    return { lines: lines, byRate: byRate, total: total, all: allBack };
+  }
+
+  // ================= タイムセール・まとめ売り =================
+  function hhmm(d) { return (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes(); }
+  function ymdOf(d) { return d.getFullYear() + '-' + (d.getMonth() < 9 ? '0' : '') + (d.getMonth() + 1) + '-' + (d.getDate() < 10 ? '0' : '') + d.getDate(); }
+  /** その日時に有効か（曜日・期間・時間帯） */
+  function promoActive(p, now) {
+    if (!p || !p.active) return false;
+    var date = ymdOf(now);
+    if (p.dateFrom && date < p.dateFrom) return false;
+    if (p.dateTo && date > p.dateTo) return false;
+    if (p.days && p.days.length && p.days.indexOf(now.getDay()) < 0) return false;
+    var t = hhmm(now);
+    if (p.timeFrom && t < p.timeFrom) return false;
+    if (p.timeTo && t >= p.timeTo) return false;
+    return true;
+  }
+  function promoHits(p, line, productsById) {
+    if (p.target === 'all') return true;
+    if (p.target === 'category') {
+      var pr = productsById[line.productId];
+      return !!pr && (p.ids || []).indexOf(pr.category) >= 0;
+    }
+    return (p.ids || []).indexOf(line.productId) >= 0;
+  }
+  /**
+   * カートにタイムセール・まとめ売りを当てる。手動で値引きした行・金額入力の行は対象外。
+   * まとめ売り（例：焼き鳥どれでも5本で500円）を先に当て、当たった行にはタイムセールを重ねない。
+   * @returns { 行key: { amount, name } }
+   */
+  function applyPromos(lines, promos, products, now, mode) {
+    var byId = {};
+    (products || []).forEach(function (p) { byId[p.id] = p; });
+    var out = {};
+    var active = (promos || []).filter(function (p) { return promoActive(p, now); });
+    var eligible = lines.filter(function (l) { return !(l.discount && l.discount.value) && l.unit !== 'open'; });
+    var inBundle = {};
+    active.filter(function (p) { return p.type === 'bundle' && p.bundleQty > 1 && p.bundlePrice > 0; }).forEach(function (p) {
+      var units = [];
+      eligible.forEach(function (l) {
+        if (l.unit !== 'pc' || inBundle[l.key] || !promoHits(p, l, byId)) return;
+        for (var i = 0; i < l.qty; i++) units.push({ key: l.key, price: l.price });
+      });
+      var sets = Math.floor(units.length / p.bundleQty);
+      if (!sets) return;
+      units.sort(function (a, b) { return b.price - a.price; }); // 高い商品からまとめる（お客様に有利）
+      var chosen = units.slice(0, sets * p.bundleQty);
+      var regular = chosen.reduce(function (s, u) { return s + u.price; }, 0);
+      var disc = regular - sets * p.bundlePrice;
+      if (disc <= 0) return;
+      var perKey = {};
+      chosen.forEach(function (u) { perKey[u.key] = (perKey[u.key] || 0) + u.price; });
+      var keys = Object.keys(perKey);
+      var given = 0;
+      keys.forEach(function (k, i) {
+        var a = i === keys.length - 1 ? disc - given : Math.floor((disc * perKey[k]) / regular);
+        given += a;
+        out[k] = { amount: a, name: p.name };
+        inBundle[k] = true;
+      });
+    });
+    active.filter(function (p) { return p.type === 'timesale' && p.value > 0; }).forEach(function (p) {
+      eligible.forEach(function (l) {
+        if (inBundle[l.key] || !promoHits(p, l, byId)) return;
+        var base = lineBase(l, mode);
+        var a = p.discountType === 'pct' ? roundBy((base * p.value) / 100, mode)
+          : l.unit === 'g' ? roundBy((p.value * l.qty) / 100, mode) : p.value * l.qty; // 円引きは 100gあたり／1個あたり
+        a = Math.min(base, a);
+        if (!out[l.key] || out[l.key].amount < a) out[l.key] = { amount: a, name: p.name };
+      });
+    });
+    return out;
+  }
+
+  // ================= 売上分析 =================
+  /**
+   * 期間の店頭売上の分析（返品は差し引き、取消は除く）
+   */
+  function analyze(sales, from, to, products) {
+    var cat = {};
+    (products || []).forEach(function (p) { cat[p.id] = p.category; });
+    var r = {
+      total: 0, count: 0, days: {}, byHour: [], byWeekday: [], items: {}, byCategory: {}, byStaff: {}, byPayment: {}, returns: 0, discount: 0
+    };
+    for (var h = 0; h < 24; h++) r.byHour.push({ total: 0, count: 0 });
+    for (var w = 0; w < 7; w++) r.byWeekday.push({ total: 0, count: 0, days: {} });
+    sales.forEach(function (s) {
+      if (s.void || s.date < from || s.date > to) return;
+      var t = s.totals.total;
+      var d = new Date(s.at);
+      var isRet = s.kind === 'return';
+      r.total += t;
+      if (isRet) r.returns -= t; else r.count++;
+      r.discount += (s.totals.discount || 0) + (s.totals.lineDiscount || 0);
+      r.days[s.date] = (r.days[s.date] || 0) + t;
+      r.byHour[d.getHours()].total += t;
+      if (!isRet) r.byHour[d.getHours()].count++;
+      var wd = r.byWeekday[d.getDay()];
+      wd.total += t;
+      if (!isRet) wd.count++;
+      wd.days[s.date] = true;
+      var st = s.staff || '（未設定）';
+      var x = r.byStaff[st] || (r.byStaff[st] = { total: 0, count: 0 });
+      x.total += t;
+      if (!isRet) x.count++;
+      var p = salePayments(s);
+      if (p.cash) r.byPayment['現金'] = (r.byPayment['現金'] || 0) + p.cash;
+      if (p.cashless) { var ct = s.cashlessType || 'キャッシュレス'; r.byPayment[ct] = (r.byPayment[ct] || 0) + p.cashless; }
+      if (p.deposit) r.byPayment['前受金'] = (r.byPayment['前受金'] || 0) + p.deposit;
+      s.lines.forEach(function (l) {
+        var it = r.items[l.name] || (r.items[l.name] = { name: l.name, unit: l.unit, qty: 0, amount: 0 });
+        var amt = l.itemAmount != null ? l.itemAmount : l.amount;
+        it.qty += l.unit === 'open' ? (isRet ? -1 : 1) : l.qty;
+        it.amount += amt;
+        var c = cat[l.productId] || 'その他';
+        r.byCategory[c] = (r.byCategory[c] || 0) + amt;
+      });
+    });
+    r.avg = r.count ? Math.round(r.total / r.count) : 0;
+    r.byWeekday.forEach(function (x) { x.dayCount = Object.keys(x.days).length; delete x.days; });
+    // ABC分析：売上の大きい順に、その商品までの累計が 70% 以内なら A、90% 以内なら B、それ以外は C（1位は必ず A）
+    var list = Object.keys(r.items).map(function (k) { return r.items[k]; }).filter(function (i) { return i.amount > 0; })
+      .sort(function (a, b) { return b.amount - a.amount; });
+    var sumAmt = list.reduce(function (s, i) { return s + i.amount; }, 0) || 1;
+    var acc = 0;
+    list.forEach(function (i, n) {
+      acc += i.amount;
+      i.share = i.amount / sumAmt;
+      i.cum = acc / sumAmt;
+      i.rank = n === 0 || i.cum <= 0.7 + 1e-9 ? 'A' : i.cum <= 0.9 + 1e-9 ? 'B' : 'C';
+    });
+    r.ranking = list;
+    return r;
+  }
+
+  // ================= 発注の提案 =================
+  /**
+   * 発注点を下回る商品の発注量の提案
+   * 使える量 = 在庫 − 引当 ＋ 発注済み（未入荷）。発注点を下回ったら、適正在庫（未設定なら発注点の2倍）まで発注。
+   * 重さの商品は 1kg 単位（orderLot で変更可）に切り上げ
+   */
+  function suggestOrder(products, stock, alloc, onOrder) {
+    var out = [];
+    products.forEach(function (p) {
+      if (!p.trackStock || !(p.minStock > 0)) return;
+      var avail = (stock[p.id] || 0) - (alloc[p.id] || 0) + (onOrder[p.id] || 0);
+      if (avail >= p.minStock) return;
+      var target = p.parStock > 0 ? p.parStock : p.minStock * 2;
+      var lot = p.orderLot > 0 ? p.orderLot : (p.unit === 'g' ? 1000 : 1);
+      var qty = Math.ceil((target - avail) / lot) * lot;
+      if (qty > 0) out.push({ productId: p.id, name: p.name, unit: p.unit, supplier: p.supplier || '', avail: avail, qty: qty });
+    });
+    return out;
   }
 
   // ================= 卸 =================
@@ -437,6 +679,14 @@
   }
 
   var Calc = {
+    DENOMS: DENOMS,
+    countCash: countCash,
+    drawerSummary: drawerSummary,
+    returnAmount: returnAmount,
+    promoActive: promoActive,
+    applyPromos: applyPromos,
+    analyze: analyze,
+    suggestOrder: suggestOrder,
     dueDate: dueDate,
     invoiceStatus: invoiceStatus,
     customerLedger: customerLedger,

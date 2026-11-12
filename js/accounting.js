@@ -26,7 +26,8 @@
   function data() {
     return {
       sales: Store.getSales(), reservations: Store.getReservations(), slips: Store.getSlips(), receipts: Store.getReceipts(),
-      moves: Store.getMoves(), products: POS.products(), customers: Store.getCustomers()
+      moves: Store.getMoves(), products: POS.products(), customers: Store.getCustomers(),
+      cashmoves: Store.getCashMoves(), closings: Store.getClosings()
     };
   }
 
@@ -36,7 +37,7 @@
   function openExport() {
     var range = lastMonth();
     var st = { fmt: localStorage.getItem('nikupos.acctFormat') || 'yayoi', enc: 'sjis', from: range[0], to: range[1],
-      include: { store: true, deposit: true, wholesale: true, receipts: true, purchases: false } };
+      include: { store: true, deposit: true, wholesale: true, receipts: true, cash: true, purchases: false } };
     POS.openModal(
       '<h3>会計ソフトへ書き出す</h3><div class="sub">期間の仕訳を、会計ソフトに取り込めるファイルにします。</div>' +
       '<div class="seg" id="axFmt" style="margin:8px 0">' + Object.keys(FORMATS).map(function (k) {
@@ -45,7 +46,7 @@
       '<div class="toolbar"><input type="date" name="from" value="' + st.from + '"> 〜 <input type="date" name="to" value="' + st.to + '"></div>' +
       '<div class="form" style="gap:6px">' +
       [['store', '店頭の売上（1日ごとにまとめる）'], ['deposit', '予約の前受金（受取・返金）'], ['wholesale', '卸の売上（納品ごと）'],
-        ['receipts', '卸の入金・振込手数料'], ['purchases', '仕入（在庫の入荷で仕入単価を入れたもの）']].map(function (x) {
+        ['receipts', '卸の入金・振込手数料'], ['cash', 'レジの入出金・現金過不足'], ['purchases', '仕入（在庫の入荷で仕入単価を入れたもの）']].map(function (x) {
         return '<label class="check"><input type="checkbox" data-inc="' + x[0] + '"' + (st.include[x[0]] ? ' checked' : '') + '> ' + x[1] + '</label>';
       }).join('') + '</div>' +
       '<div id="axEnc" style="margin-top:8px"><span class="note">文字コード：</span><div class="seg compact" style="display:inline-flex">' +
@@ -131,7 +132,8 @@
   // ================= 設定 =================
   var ACCT_LABELS = [
     ['cash', '現金'], ['bank', '振込入金の口座'], ['ar', '売掛金（卸）'], ['cashless', 'キャッシュレス売上の受取'], ['cashlessSub', '　その補助科目'],
-    ['sales', '店頭の売上'], ['wsSales', '卸の売上'], ['deposit', '予約の前受金'], ['fee', '振込手数料'], ['purchase', '仕入'], ['ap', '仕入の未払い（買掛金）']
+    ['sales', '店頭の売上'], ['wsSales', '卸の売上'], ['deposit', '予約の前受金'], ['fee', '振込手数料'], ['purchase', '仕入'], ['ap', '仕入の未払い（買掛金）'],
+    ['miscLoss', 'レジの現金不足'], ['miscGain', 'レジの現金過剰']
   ];
   var KANJI = ['一', '二', '三', '四', '五', '六'];
 

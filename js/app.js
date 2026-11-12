@@ -25,6 +25,14 @@ Store.init().then(function () {
   function yen(n) { n = Number(n || 0); return (n < 0 ? '-¥' : '¥') + Math.abs(n).toLocaleString('ja-JP'); }
   function num(n) { return Number(n || 0).toLocaleString('ja-JP'); }
   function noOf(x) { return x.noLabel || x.no; }
+  /** この端末の記号（レジ締めは端末ごと） */
+  function myDev() { return settings.deviceCode || ''; }
+  /** いまの担当者名（担当者を使わない設定なら空） */
+  function staffName() { var st = POS.currentStaff && POS.currentStaff(); return st ? st.name : ''; }
+  function cashlessTypes() {
+    var t = settings.cashlessTypes;
+    return t && t.length ? t : ['クレジット', '電子マネー', 'QR決済'];
+  }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function localDate(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function timeStr(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
@@ -69,7 +77,7 @@ Store.init().then(function () {
     document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
     if (name === 'register') renderRegister();
     if (name === 'reservations') renderReservations();
-    if (name === 'sales') renderSales();
+    if (name === 'sales') renderSalesTab();
     if (name === 'products') renderProductList();
     if (name === 'settings') renderSettings();
     if (POS.views[name]) POS.views[name]();
@@ -162,6 +170,7 @@ Store.init().then(function () {
     $('catTabs').innerHTML = tabs.map(function (t) {
       return '<button class="btn' + (t[0] === currentCat ? ' on' : '') + '" data-cat="' + esc(t[0]) + '">' + esc(t[1]) + '</button>';
     }).join('');
+    refreshPromos();
     renderGrid();
     renderCart();
   }
@@ -176,8 +185,10 @@ Store.init().then(function () {
     });
     $('productGrid').innerHTML = list.length ? list.map(function (p) {
       var badge = counts[p.id] ? '<span class="p-badge">' + counts[p.id] + '</span>' : '';
+      var promo = POS.promoLabel ? POS.promoLabel(p) : '';
       return '<button class="product" data-id="' + p.id + '" style="--c:' + esc(p.color) + '">' +
         badge + '<span class="p-name">' + esc(p.name) + '</span>' +
+        (promo ? '<span class="p-promo">' + esc(promo) + '</span>' : '') +
         '<span class="p-price">' + priceLabel(p) + (p.taxRate === 10 ? '（10%）' : '') + '</span></button>';
     }).join('') : '<p class="note">商品がありません。「商品」タブから登録してください。</p>';
   }
@@ -222,10 +233,33 @@ Store.init().then(function () {
   }
 
   function saveCart() {
+    refreshPromos();
     Store.saveCart(cart);
     renderGrid();
     renderCart();
   }
+
+  /** タイムセール・まとめ売りをカートに当て直す（設定の promos） */
+  function refreshPromos() {
+    var r = Calc.applyPromos(cart.lines, settings.promos || [], products, new Date(), round());
+    cart.lines.forEach(function (l) {
+      var x = r[l.key];
+      l.promoDiscount = x ? x.amount : 0;
+      l.promoName = x ? x.name : '';
+    });
+  }
+  /** 行の値引きの表示名（手動の値引きかタイムセールの名前） */
+  function lineDiscLabel(l) {
+    if (l.discount && l.discount.value) return discLabel(l.discount);
+    return l.promoName || '値引';
+  }
+  // 時間帯が切り替わったときのため、1分ごとに当て直す
+  setInterval(function () {
+    if (!cart.lines.length || !$('view-register').classList.contains('active')) return;
+    var before = JSON.stringify(cart.lines.map(function (l) { return l.promoDiscount || 0; }));
+    refreshPromos();
+    if (JSON.stringify(cart.lines.map(function (l) { return l.promoDiscount || 0; })) !== before) { Store.saveCart(cart); renderCart(); }
+  }, 60000);
 
   function renderCart() {
     var t = Calc.totals(cart.lines, cart.discount, round());
@@ -242,7 +276,7 @@ Store.init().then(function () {
           '<span class="l-name">' + esc(l.name) + '</span>' +
           '<span class="l-amt num">' + yen(Calc.lineAmount(l, round())) + '</span>' +
           '<span class="l-detail">' + detail + '</span>' +
-          '<span class="l-disc">' + (disc ? discLabel(l.discount) + ' -' + num(disc) : '') + '</span>' +
+          '<span class="l-disc">' + (disc ? esc(lineDiscLabel(l)) + ' -' + num(disc) : '') + '</span>' +
           '</li>';
       }).join('');
     }
@@ -534,11 +568,18 @@ Store.init().then(function () {
         } else if (b.dataset.act === 'ok') {
           var q = Number(qtyVal || 0);
           if (!q) return;
-          if (line.unit === 'open') line.price = q; else line.qty = q;
-          delete line.estimated;
-          line.discount = disc && disc.value ? disc : null;
-          closeModal();
-          saveCart();
+          var newDisc = disc && disc.value ? disc : null;
+          var discChanged = JSON.stringify(newDisc) !== JSON.stringify(line.discount || null);
+          var apply = function () {
+            if (line.unit === 'open') line.price = q; else line.qty = q;
+            delete line.estimated;
+            line.discount = newDisc;
+            if (discChanged && newDisc) POS.log('discount', line.name + ' ' + discLabel(newDisc));
+            closeModal();
+            saveCart();
+          };
+          if (discChanged && newDisc) POS.requirePerm('discount', '値引き（' + line.name + '）').then(function (ok) { if (ok) apply(); });
+          else apply();
         }
       }
     );
@@ -584,9 +625,15 @@ Store.init().then(function () {
           draw();
         } else if (b.dataset.act === 'cancel') closeModal();
         else if (b.dataset.act === 'ok') {
-          cart.discount = disc && disc.value ? disc : null;
-          closeModal();
-          saveCart();
+          var nd = disc && disc.value ? disc : null;
+          var applyTx = function () {
+            cart.discount = nd;
+            if (nd) POS.log('discount', '小計値引き ' + discLabel(nd));
+            closeModal();
+            saveCart();
+          };
+          if (nd && JSON.stringify(nd) !== JSON.stringify(cart.discount || null)) POS.requirePerm('discount', '小計値引き').then(function (ok) { if (ok) applyTx(); });
+          else applyTx();
         }
       }
     );
@@ -599,11 +646,15 @@ Store.init().then(function () {
     if (cart.lines.some(function (l) { return l.estimated; }) &&
       !confirm('予約時の予定重量のままの商品があります。このまま会計しますか？\n（実際の重さに直すには、カートの商品をタップ）')) return;
     $('cartPanel').classList.remove('open');
+    refreshPromos();
+    Store.saveCart(cart);
+    renderCart();
     var t = Calc.totals(cart.lines, cart.discount, round());
     var deposit = cart.deposit || 0;
     if (t.total - deposit <= 0) { openDepositSettleModal(t, deposit); return; }
     var due = t.total - deposit;
     var method = 'cash';
+    var ctype = cashlessTypes()[0];
     var val = '';
     function pay() { return Calc.payments(t.total, deposit, method, Number(val || 0)); }
     function draw() {
@@ -612,8 +663,12 @@ Store.init().then(function () {
       $('mC').textContent = p.change >= 0 ? yen(p.change) : '不足 ' + yen(-p.change);
       $('mOk').disabled = p.change < 0;
       $('mCashArea').style.display = method === 'cash' ? '' : 'none';
+      $('mCtype').style.display = method === 'cashless' ? '' : 'none';
       modalBody.querySelectorAll('[data-method]').forEach(function (b) {
         b.classList.toggle('on', b.dataset.method === method);
+      });
+      modalBody.querySelectorAll('[data-ctype]').forEach(function (b) {
+        b.classList.toggle('on', b.dataset.ctype === ctype);
       });
     }
     var bills = [1000, 2000, 5000, 10000].filter(function (b) { return b >= due || b === 10000; });
@@ -622,6 +677,9 @@ Store.init().then(function () {
     openModal(
       '<h3>お会計' + (cart.customer ? '<span class="resv-chip">' + esc(cart.customer) + ' 様</span>' : '') + '</h3>' +
       '<div class="seg"><button class="btn" data-method="cash">現金</button><button class="btn" data-method="cashless">キャッシュレス</button></div>' +
+      '<div class="seg" id="mCtype" style="margin-top:6px">' + cashlessTypes().map(function (c) {
+        return '<button class="btn small" data-ctype="' + esc(c) + '">' + esc(c) + '</button>';
+      }).join('') + '</div>' +
       (deposit
         ? '<div class="display sub2"><span class="label">合計 ' + yen(t.total) + '／前受金</span><span class="value">-' + num(deposit) + '</span></div>' +
           '<div class="display"><span class="label">お支払い残額</span><span class="value">' + yen(due) + '</span></div>'
@@ -637,11 +695,12 @@ Store.init().then(function () {
         if (b.dataset.key) { val = applyKey(val, b.dataset.key, 7); draw(); }
         else if (b.dataset.set) { val = b.dataset.set; draw(); }
         else if (b.dataset.method) { method = b.dataset.method; draw(); }
+        else if (b.dataset.ctype) { ctype = b.dataset.ctype; draw(); }
         else if (b.dataset.act === 'cancel') closeModal();
         else if (b.dataset.act === 'ok') {
           var p = pay();
           if (p.change < 0) return;
-          completeSale(p);
+          completeSale(p, method === 'cashless' ? ctype : '');
         }
       }
     );
@@ -667,7 +726,7 @@ Store.init().then(function () {
     );
   }
 
-  function completeSale(p) {
+  function completeSale(p, ctype) {
     var t = Calc.totals(cart.lines, cart.discount, round());
     var now = new Date();
     var sale = {
@@ -678,7 +737,7 @@ Store.init().then(function () {
       lines: cart.lines.map(function (l) {
         return {
           productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: l.qty,
-          taxRate: l.taxRate, discount: l.discount,
+          taxRate: l.taxRate, discount: l.discount, promoName: l.promoName || '', promoDiscount: l.promoDiscount || 0,
           discountAmount: Calc.lineDiscount(l, round()),
           amount: Calc.lineAmount(l, round())
         };
@@ -686,6 +745,9 @@ Store.init().then(function () {
       discount: cart.discount,
       totals: t,
       method: p.cashless > 0 ? 'cashless' : 'cash',
+      cashlessType: p.cashless > 0 ? (ctype || cashlessTypes()[0]) : '',
+      dev: myDev(),
+      staff: staffName(),
       received: p.received,
       change: p.change,
       refund: p.refund,
@@ -717,12 +779,14 @@ Store.init().then(function () {
       '<div class="sub" style="text-align:center">取引No.' + noOf(sale) + '　合計 ' + yen(t.total) +
       (p.deposit ? '　前受金 ' + yen(p.deposit) : '') +
       (p.cash > 0 ? '　お預かり ' + yen(p.received) : '') + '</div>' +
+      '<div class="btn-row" style="justify-content:center"><button class="btn small" data-act="named">宛名入り領収書</button></div>' +
       '<div class="modal-foot"><button class="btn" data-act="print">レシート印刷</button>' +
       '<button class="btn primary big" data-act="next">次のお客様</button></div>',
       function (e) {
         var b = e.target.closest('button');
         if (!b) return;
         if (b.dataset.act === 'print') printReceipt(sale);
+        if (b.dataset.act === 'named') openNamedReceipt(sale);
         if (b.dataset.act === 'next') closeModal();
       },
       false
@@ -744,18 +808,20 @@ Store.init().then(function () {
     if (settings.address) h += '<div class="c">' + esc(settings.address) + '</div>';
     if (settings.tel) h += '<div class="c">TEL ' + esc(settings.tel) + '</div>';
     if (settings.invoiceNo) h += '<div class="c">登録番号 ' + esc(settings.invoiceNo) + '</div>';
-    h += '<div class="c" style="margin-top:4px">' + (settings.invoiceNo ? '領収書（適格簡易請求書）' : '領収書') + '</div>';
+    h += '<div class="c" style="margin-top:4px">' + (sale.kind === 'return' ? '返品・返金' : settings.invoiceNo ? '領収書（適格簡易請求書）' : '領収書') + '</div>';
     if (sale.void) h += '<div class="voidmark">取 消</div>';
     if (reprint) h += '<div class="c">＊＊ 再発行 ＊＊</div>';
     h += '<div class="row"><span>' + dateTimeStr(d) + '</span><span>No.' + noOf(sale) + '</span></div>';
     if (sale.customer) h += '<div>' + esc(sale.customer) + ' 様（ご予約）</div>';
+    if (sale.kind === 'return') h += '<div>元の取引 No.' + esc(sale.origNo) + (sale.reason ? '・' + esc(sale.reason) : '') + '</div>';
+    if (sale.staff) h += '<div>担当 ' + esc(sale.staff) + '</div>';
     h += '<hr>';
     sale.lines.forEach(function (l) {
       var mark = l.taxRate === 8 ? '※' : '';
       h += '<div class="row"><span>' + mark + esc(l.name) + '</span><span>' + yen(l.amount + (l.discountAmount || 0)) + '</span></div>';
-      if (l.unit === 'g') h += '<div class="ind">' + yen(l.price) + '/100g × ' + num(l.qty) + 'g</div>';
-      else if (l.unit === 'pc' && l.qty > 1) h += '<div class="ind">' + yen(l.price) + ' × ' + l.qty + '</div>';
-      if (l.discountAmount) h += '<div class="row ind"><span>値引 ' + discLabel(l.discount) + '</span><span>-' + num(l.discountAmount) + '</span></div>';
+      if (l.unit === 'g') h += '<div class="ind">' + yen(l.price) + '/100g × ' + num(Math.abs(l.qty)) + 'g</div>';
+      else if (l.unit === 'pc' && Math.abs(l.qty) > 1) h += '<div class="ind">' + yen(l.price) + ' × ' + Math.abs(l.qty) + '</div>';
+      if (l.discountAmount) h += '<div class="row ind"><span>' + (l.promoName && !(l.discount && l.discount.value) ? esc(l.promoName) : '値引 ' + discLabel(l.discount)) + '</span><span>-' + num(l.discountAmount) + '</span></div>';
     });
     var t = sale.totals;
     h += '<hr><div class="row"><span>小計</span><span>' + yen(t.subtotal) + '</span></div>';
@@ -767,11 +833,15 @@ Store.init().then(function () {
     });
     h += '<hr>';
     var pm = Calc.salePayments(sale);
-    if (pm.deposit) h += row('前受金', '-' + num(pm.deposit));
-    if (sale.refund) {
+    if (sale.kind === 'return') {
+      h += row('<b>ご返金（' + (pm.cashless ? esc(sale.cashlessType || 'キャッシュレス') : '現金') + '）</b>', '<b>' + yen(-t.total) + '</b>');
+    } else if (pm.deposit) h += row('前受金', '-' + num(pm.deposit));
+    if (sale.kind === 'return') {
+      // 返品は支払いの表示なし
+    } else if (sale.refund) {
       h += row('前受金のご返金', yen(sale.refund));
     } else if (pm.cashless) {
-      h += row('キャッシュレス', yen(pm.cashless));
+      h += row(esc(sale.cashlessType || 'キャッシュレス'), yen(pm.cashless));
     } else if (pm.cash > 0 || !pm.deposit) {
       h += row('お預かり', yen(sale.received));
       h += row('おつり', yen(sale.change));
@@ -785,15 +855,16 @@ Store.init().then(function () {
 
   // ================= 売上画面 =================
   function summarize(date) {
-    return Calc.summarizeDay(Store.getSales(), Store.getReservations(), date, { slips: Store.getSlips(), receipts: Store.getReceipts() });
+    return Calc.summarizeDay(Store.getSales(), Store.getReservations(), date, { slips: Store.getSlips(), receipts: Store.getReceipts(), cashmoves: Store.getCashMoves() });
   }
 
   function payLabel(x) {
     var p = Calc.salePayments(x);
     var parts = [];
+    if (x.kind === 'return') return '返品（' + (p.cashless ? (x.cashlessType || 'キャッシュレス') : '現金') + '）';
     if (p.deposit) parts.push('前受金');
     if (p.cash > 0) parts.push('現金');
-    if (p.cashless) parts.push('キャッシュレス');
+    if (p.cashless) parts.push(x.cashlessType || 'キャッシュレス');
     if (x.refund) parts.push('返金');
     return parts.join('＋') || '現金';
   }
@@ -806,7 +877,11 @@ Store.init().then(function () {
     h += card('客数', s.count + '件');
     h += card('客単価', yen(s.count ? Math.round(s.total / s.count) : 0));
     h += card('現金', yen(s.cash) + (s.cash < 0 ? '<div class="note">前受金の差額返金を含む</div>' : ''));
-    h += card('キャッシュレス', yen(s.cashless));
+    h += card('キャッシュレス', yen(s.cashless) + Object.keys(s.cashlessBy).map(function (k) {
+      return '<div class="note">' + esc(k) + ' ' + yen(s.cashlessBy[k]) + '</div>';
+    }).join(''));
+    if (s.returns.count) h += card('返品', yen(s.returns.amount) + '<div class="note">' + s.returns.count + '件（売上から差し引き済み）</div>');
+    if (s.cashIn || s.cashOut) h += card('入出金', '<div class="note">入金 ' + yen(s.cashIn) + '・出金 ' + yen(s.cashOut) + '</div>');
     h += card('値引き合計', yen(s.discount));
     if (s.depositUsed) h += card('前受金から充当', yen(s.depositUsed));
     var dIn = s.depositIn.cash + s.depositIn.cashless;
@@ -818,7 +893,7 @@ Store.init().then(function () {
     if (w.cashOnDelivery || w.receiptCash) h += card('卸の現金回収', yen(w.cashOnDelivery + w.receiptCash));
     if (w.receiptOther) h += card('卸の振込などの入金', yen(w.receiptOther));
     if (w.fee) h += card('振込手数料（当方負担）', yen(w.fee) + '<div class="note">売掛金から差し引き。経費（支払手数料）</div>');
-    h += card('レジ内現金の増減', yen(s.drawerCash) + '<div class="note">現金売上＋前受金−返金＋卸の現金回収</div>');
+    h += card('レジ内現金の増減', yen(s.drawerCash) + '<div class="note">全端末の合計。現金売上＋前受金−返金＋卸の現金回収＋入金−出金。端末ごとは「レジ締め」で</div>');
     Object.keys(s.rates).sort(function (a, b) { return a - b; }).forEach(function (r) {
       h += card(r + '%対象（内税）', yen(s.rates[r].amount) + '<div class="note">税 ' + yen(s.rates[r].tax) + '</div>');
     });
@@ -851,6 +926,22 @@ Store.init().then(function () {
     }
     $('salesSummary').innerHTML = h;
   }
+  // 売上タブの中の切り替え（日別・レジ締め・入出金・分析・操作ログ）
+  var salesTab = 'day';
+  $('salesTabs').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-stab]');
+    if (!b) return;
+    salesTab = b.dataset.stab;
+    renderSalesTab();
+  });
+  function renderSalesTab() {
+    document.querySelectorAll('#salesTabs [data-stab]').forEach(function (b) { b.classList.toggle('on', b.dataset.stab === salesTab); });
+    $('salesDay').hidden = salesTab !== 'day';
+    $('salesPane').hidden = salesTab === 'day';
+    if (salesTab === 'day') renderSales();
+    else if (POS.salesTabs[salesTab]) POS.salesTabs[salesTab]($('salesPane'));
+  }
+
   function card(k, v) { return '<div class="card"><div class="k">' + k + '</div><div class="v num">' + v + '</div></div>'; }
 
   $('salesDate').addEventListener('change', function () { salesDate = this.value || localDate(new Date()); renderSales(); });
@@ -870,35 +961,205 @@ Store.init().then(function () {
   });
 
   function openSaleDetail(sale) {
+    var isRet = sale.kind === 'return';
+    var rets = Store.getSales().filter(function (x) { return x.kind === 'return' && x.origId === sale.id && !x.void; });
+    var canReturn = !isRet && !sale.void && (sale.refunded || 0) < sale.totals.total;
     openModal(
-      '<h3>取引No.' + noOf(sale) + (sale.void ? '（取消済）' : '') + '</h3>' +
+      '<h3>' + (isRet ? '返品 No.' : '取引No.') + noOf(sale) + (sale.void ? '（取消済）' : '') + '</h3>' +
+      (rets.length ? '<p class="note">この取引から返品：' + rets.map(function (x) { return 'No.' + noOf(x) + ' ' + yen(-x.totals.total); }).join('、') + '</p>' : '') +
       '<div class="receipt" style="width:auto;padding:8px 0;font-size:14px">' + receiptHtml(sale) + '</div>' +
       '<div class="btn-row">' +
       '<button class="btn" data-act="reprint">レシート再発行</button>' +
-      (sale.void ? '' : '<button class="btn danger-outline" data-act="void">この取引を取消</button>') +
+      (!isRet && !sale.void && sale.totals.total - (sale.refunded || 0) > 0 ? '<button class="btn" data-act="named">宛名入り領収書</button>' : '') +
+      (canReturn ? '<button class="btn" data-act="return">一部返品・返金</button>' : '') +
+      (!isRet && !sale.void && !rets.length ? '<button class="btn danger-outline" data-act="void">この取引を取消</button>' : '') +
       '<span class="spacer"></span><button class="btn primary" data-act="close">閉じる</button></div>',
       function (e) {
         var b = e.target.closest('button');
         if (!b) return;
         if (b.dataset.act === 'close') closeModal();
         if (b.dataset.act === 'reprint') printReceipt(sale, true);
+        if (b.dataset.act === 'named') openNamedReceipt(sale);
+        if (b.dataset.act === 'return') POS.requirePerm('return', '返品・返金').then(function (ok) { if (ok) openReturnModal(sale); });
         if (b.dataset.act === 'void') {
-          if (!confirm('取引No.' + noOf(sale) + '（' + yen(sale.totals.total) + '）を取り消しますか？\n返金は手作業で行ってください。在庫は元に戻ります。' + (sale.reservationId ? '\n予約は「予約中」に戻ります。' : ''))) return;
-          var x = Store.getSales().find(function (y) { return y.id === sale.id; });
-          x.void = true;
-          x.voidAt = new Date().toISOString();
-          Store.updateSale(x);
-          if (x.reservationId) {
-            var rl = Store.getReservations();
-            var rr = rl.find(function (y) { return y.id === x.reservationId; });
-            if (rr && rr.status === 'done') { rr.status = 'reserved'; rr.saleId = null; saveResvList(rl); }
-          }
-          closeModal();
-          renderSales();
-          toast('取消しました');
+          POS.requirePerm('void', '取引の取消').then(function (ok) {
+            if (!ok) return;
+            if (!confirm('取引No.' + noOf(sale) + '（' + yen(sale.totals.total) + '）を取り消しますか？\n返金は手作業で行ってください。在庫は元に戻ります。' + (sale.reservationId ? '\n予約は「予約中」に戻ります。' : ''))) return;
+            var x = Store.getSales().find(function (y) { return y.id === sale.id; });
+            x.void = true;
+            x.voidAt = new Date().toISOString();
+            x.voidBy = staffName();
+            Store.updateSale(x);
+            if (x.reservationId) {
+              var rl = Store.getReservations();
+              var rr = rl.find(function (y) { return y.id === x.reservationId; });
+              if (rr && rr.status === 'done') { rr.status = 'reserved'; rr.saleId = null; saveResvList(rl); }
+            }
+            POS.log('void', '取引No.' + noOf(x) + ' ' + yen(x.totals.total) + ' を取消');
+            closeModal();
+            renderSales();
+            toast('取消しました');
+          });
         }
       }
     );
+  }
+
+  // ---------- 一部返品・返金 ----------
+  function openReturnModal(sale) {
+    var sel = {};
+    var returned = sale.returned || {};
+    var pm = Calc.salePayments(sale);
+    var method = pm.cashless > 0 ? 'cashless' : 'cash';
+    var ctype = sale.cashlessType || cashlessTypes()[0];
+    openModal(
+      '<h3>一部返品・返金（取引No.' + noOf(sale) + '）</h3><div class="sub">返品する数量を入れてください（重さは g）。</div>' +
+      '<div>' + sale.lines.map(function (l, i) {
+        var left = l.qty - (returned[i] || 0);
+        return '<div class="ritem" style="grid-template-columns:1fr 100px 64px"><div class="rname">' + esc(l.name) +
+          '<small>' + (l.unit === 'g' ? num(l.qty) + 'g' : l.unit === 'pc' ? l.qty + '個' : '金額入力') + '・' + yen(l.amount) +
+          (returned[i] ? '・返品済 ' + (l.unit === 'g' ? num(returned[i]) + 'g' : returned[i]) : '') + '</small></div>' +
+          (left > 0 ? '<input type="number" inputmode="numeric" min="0" max="' + left + '" data-ri="' + i + '" placeholder="0">' +
+            '<button type="button" class="btn small" data-all="' + i + '" data-left="' + left + '">全部</button>' : '<span class="note">返品済</span><span></span>') + '</div>';
+      }).join('') + '</div>' +
+      '<div class="seg" style="margin:8px 0"><button type="button" class="btn small" data-rm="cash">現金で返金</button>' +
+      cashlessTypes().map(function (c) { return '<button type="button" class="btn small" data-rm="cashless" data-ct="' + esc(c) + '">' + esc(c) + 'で返金</button>'; }).join('') + '</div>' +
+      '<input id="retReason" placeholder="理由（例：傷み、数量違い）" style="width:100%;min-height:44px;padding:0 10px;border:1px solid var(--line);border-radius:8px" autocomplete="off">' +
+      '<div class="tot-box" id="retTot"></div>' +
+      '<div class="modal-foot"><button class="btn" data-act="cancel">キャンセル</button><button class="btn primary" id="mOk" data-act="ok">返品して返金</button></div>',
+      function (e) {
+        var b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.all != null) {
+          sel[b.dataset.all] = Number(b.dataset.left);
+          modalBody.querySelector('[data-ri="' + b.dataset.all + '"]').value = b.dataset.left;
+          draw();
+        } else if (b.dataset.rm) { method = b.dataset.rm; if (b.dataset.ct) ctype = b.dataset.ct; draw(); }
+        else if (b.dataset.act === 'cancel') closeModal();
+        else if (b.dataset.act === 'ok') save();
+      },
+      false
+    );
+    modalBody.oninput = function (e) {
+      var i = e.target.dataset.ri;
+      if (i == null) return;
+      sel[i] = Math.max(0, Math.floor(Number(e.target.value) || 0));
+      draw();
+    };
+    function calc() { return Calc.returnAmount(sale, sel, round()); }
+    function draw() {
+      var r = calc();
+      $('retTot').innerHTML = r.lines.map(function (l) {
+        return '<div class="sum-row"><span>' + esc(l.name) + ' ' + (l.unit === 'g' ? num(l.qty) + 'g' : l.unit === 'pc' ? l.qty + '個' : '') + '</span><span class="num">' + yen(l.amount) + '</span></div>';
+      }).join('') + '<div class="sum-row total"><span>返金額</span><span class="num">' + yen(r.total) + '</span></div>' +
+        (sale.totals.discount ? '<p class="note">全体値引きの分を差し引いた金額です。</p>' : '');
+      $('mOk').disabled = !r.total;
+      modalBody.querySelectorAll('[data-rm]').forEach(function (x) {
+        x.classList.toggle('on', x.dataset.rm === method && (method === 'cash' || x.dataset.ct === ctype));
+      });
+    }
+    function save() {
+      var r = calc();
+      if (!r.total) return;
+      if (!confirm(yen(r.total) + ' を' + (method === 'cash' ? '現金' : ctype) + 'で返金します。よろしいですか？')) return;
+      var now = new Date();
+      var T = r.total;
+      var ret = {
+        id: Store.newId('S'), kind: 'return', origId: sale.id, origNo: noOf(sale), at: now.toISOString(), date: localDate(now),
+        dev: myDev(), staff: staffName(), reason: $('retReason').value.trim(),
+        lines: r.lines.map(function (l) {
+          return { productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: -l.qty, taxRate: l.taxRate, discountAmount: 0, amount: -l.amount, itemAmount: -l.base };
+        }),
+        discount: null,
+        totals: { subtotal: -T, discount: 0, lineDiscount: 0, total: -T, byRate: r.byRate.map(function (x) { return { rate: x.rate, amount: -x.amount, tax: -x.tax }; }) },
+        method: method, cashlessType: method === 'cashless' ? ctype : '', received: 0, change: 0,
+        payments: { deposit: 0, cash: method === 'cash' ? -T : 0, cashless: method === 'cashless' ? -T : 0 },
+        void: false
+      };
+      var sn = Store.makeNo('seq');
+      ret.no = sn.no;
+      ret.noLabel = sn.noLabel;
+      Store.addSale(ret);
+      var orig = Store.getSales().find(function (x) { return x.id === sale.id; });
+      orig.returned = orig.returned || {};
+      r.lines.forEach(function (l) { orig.returned[l.idx] = (orig.returned[l.idx] || 0) + l.qty; });
+      orig.refunded = (orig.refunded || 0) + T;
+      Store.updateSale(orig);
+      POS.log('return', '取引No.' + noOf(orig) + ' から返品 ' + yen(T) + '（' + (method === 'cash' ? '現金' : ctype) + '）' + (ret.reason ? ' ' + ret.reason : ''));
+      closeModal();
+      renderSales();
+      printReceipt(ret);
+      toast('返品しました。' + yen(T) + ' を返金してください');
+    }
+    draw();
+  }
+
+  // ---------- 宛名入り領収書 ----------
+  function netOfReturns(sale) {
+    var g = {};
+    sale.totals.byRate.forEach(function (r) { g[r.rate] = { amount: r.amount, tax: r.tax }; });
+    var total = sale.totals.total;
+    Store.getSales().forEach(function (x) {
+      if (x.kind !== 'return' || x.origId !== sale.id || x.void) return;
+      total += x.totals.total;
+      x.totals.byRate.forEach(function (r) {
+        var y = g[r.rate] || (g[r.rate] = { amount: 0, tax: 0 });
+        y.amount += r.amount;
+        y.tax += r.tax;
+      });
+    });
+    return { total: total, byRate: Object.keys(g).map(Number).sort(function (a, b) { return a - b; }).map(function (k) { return { rate: k, amount: g[k].amount, tax: g[k].tax }; }) };
+  }
+  function openNamedReceipt(sale) {
+    var net = netOfReturns(sale);
+    var honor = '様';
+    var last = (sale.namedReceipts || []).slice(-1)[0];
+    openModal(
+      '<h3>宛名入り領収書</h3><div class="sub">取引No.' + noOf(sale) + '・' + yen(net.total) + (net.total !== sale.totals.total ? '（返品を差し引き後）' : '') + '</div>' +
+      '<form class="form" id="nrForm" onsubmit="return false" style="margin-top:8px">' +
+      '<div style="display:grid;grid-template-columns:1fr 110px;gap:8px"><label>宛名<input name="name" value="' + esc(last ? last.name : '') + '" placeholder="例：居酒屋とりまる" autocomplete="off"></label>' +
+      '<label>敬称<select name="honor"><option>様</option><option>御中</option></select></label></div>' +
+      '<label>但し書き<input name="note" value="' + esc(last ? last.note : 'お品代として') + '" autocomplete="off"></label></form>' +
+      ((sale.namedReceipts || []).length ? '<p class="note">この取引の領収書は発行済みです（' + sale.namedReceipts.length + '回）。「再発行」と印刷されます。</p>' : '') +
+      '<div class="modal-foot"><button class="btn" data-act="cancel">キャンセル</button><button class="btn primary" data-act="ok">印刷</button></div>',
+      function (e) {
+        var b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.act === 'cancel') closeModal();
+        if (b.dataset.act === 'ok') {
+          var f = $('nrForm').elements;
+          var x = Store.getSales().find(function (y) { return y.id === sale.id; });
+          var reissue = (x.namedReceipts || []).length > 0;
+          x.namedReceipts = (x.namedReceipts || []).concat([{ at: new Date().toISOString(), name: f.name.value.trim(), honor: f.honor.value, note: f.note.value.trim(), staff: staffName() }]);
+          Store.updateSale(x);
+          POS.log('receipt', '取引No.' + noOf(x) + ' 宛名入り領収書' + (reissue ? '（再発行）' : '') + '：' + f.name.value.trim());
+          closeModal();
+          printHtml(namedReceiptHtml(x, net, f.name.value.trim(), f.honor.value, f.note.value.trim(), reissue));
+        }
+      }
+    );
+    if (last) $('nrForm').elements.honor.value = last.honor || honor;
+  }
+  function namedReceiptHtml(sale, net, name, honor, note, reissue) {
+    var pm = Calc.salePayments(sale);
+    var exTax = net.total - net.byRate.reduce(function (s, r) { return s + r.tax; }, 0);
+    var needStamp = exTax >= 50000 && pm.cash > 0 && !pm.cashless; // 現金で税抜5万円以上は収入印紙が必要
+    var h = '<div class="c title">領 収 書</div>' + (reissue ? '<div class="c">＊＊ 再発行 ＊＊</div>' : '') +
+      '<div class="c">' + POS.dateTimeStr(new Date(sale.at)).split(' ')[0] + '　No.' + noOf(sale) + '</div><hr>' +
+      '<div class="big" style="border-bottom:1px solid #000;margin:6px 0">' + esc(name || '') + '　' + honor + '</div>' +
+      '<div class="c big" style="font-size:1.8em;margin:6px 0">' + yen(net.total) + '-</div>' +
+      '<div>但し ' + esc(note || 'お品代として') + '</div><div>上記正に領収いたしました。</div><hr>' +
+      net.byRate.filter(function (r) { return r.amount; }).map(function (r) {
+        return row(r.rate + '%対象' + (r.rate === 8 ? '（軽減）' : ''), yen(r.amount)) + row('　内消費税等', yen(r.tax));
+      }).join('') +
+      (pm.cashless > 0 ? '<div>' + esc(sale.cashlessType || 'キャッシュレス') + 'でのお支払い</div>' : '') +
+      (needStamp ? '<div style="border:1px dashed #000;width:22mm;height:22mm;margin:6px 0;text-align:center;font-size:10px;padding-top:7mm">収入印紙</div>' : '') +
+      '<hr><div class="c" style="font-weight:700">' + esc(settings.storeName) + '</div>' +
+      (settings.address ? '<div class="c">' + esc(settings.address) + '</div>' : '') +
+      (settings.tel ? '<div class="c">TEL ' + esc(settings.tel) + '</div>' : '') +
+      (settings.invoiceNo ? '<div class="c">登録番号 ' + esc(settings.invoiceNo) + '</div>' : '') +
+      (sale.staff ? '<div class="c">担当 ' + esc(sale.staff) + '</div>' : '');
+    return h;
   }
 
   $('btnPrintReport').addEventListener('click', function () {
@@ -906,7 +1167,11 @@ Store.init().then(function () {
     var h = '<div class="c title">精算レポート</div><div class="c">' + esc(settings.storeName) + '</div>';
     h += '<div class="c">' + salesDate + '</div><div class="c">出力 ' + dateTimeStr(new Date()) + '</div><hr>';
     h += row('売上合計', yen(s.total)) + row('客数', s.count + '件') + row('客単価', yen(s.count ? Math.round(s.total / s.count) : 0));
-    h += '<hr>' + row('現金', yen(s.cash)) + row('キャッシュレス', yen(s.cashless)) + row('前受金から充当', yen(s.depositUsed)) +
+    h += '<hr>' + row('現金', yen(s.cash)) + row('キャッシュレス', yen(s.cashless)) +
+      Object.keys(s.cashlessBy).map(function (k) { return row('　' + esc(k), yen(s.cashlessBy[k])); }).join('') +
+      row('返品（' + s.returns.count + '件）', yen(s.returns.amount)) +
+      row('入金', yen(s.cashIn)) + row('出金', yen(s.cashOut)) +
+      row('前受金から充当', yen(s.depositUsed)) +
       row('値引き合計', yen(s.discount)) + row('取消', s.voids + '件');
     h += '<hr>' + row('前受金の受取（現金）', yen(s.depositIn.cash)) + row('前受金の受取（キャッシュレス）', yen(s.depositIn.cashless)) +
       row('前受金の返金（現金）', yen(s.depositRefund.cash));
@@ -996,6 +1261,9 @@ Store.init().then(function () {
   $('productList').addEventListener('click', function (e) {
     var b = e.target.closest('button');
     if (!b) return;
+    POS.requirePerm('products', '商品の変更').then(function (ok) { if (ok) productAction(b); });
+  });
+  function productAction(b) {
     if (b.dataset.edit) {
       openProductModal(products.find(function (p) { return p.id === b.dataset.edit; }));
     } else if (b.dataset.move) {
@@ -1010,8 +1278,10 @@ Store.init().then(function () {
       Store.saveProducts(products);
       renderProductList();
     }
+  }
+  $('btnAddProduct').addEventListener('click', function () {
+    POS.requirePerm('products', '商品の追加').then(function (ok) { if (ok) openProductModal(null); });
   });
-  $('btnAddProduct').addEventListener('click', function () { openProductModal(null); });
 
   function openProductModal(p) {
     var isNew = !p;
@@ -1033,6 +1303,9 @@ Store.init().then(function () {
       '<label class="check" id="pTrackLabel"><input type="checkbox" name="trackStock"' + (d.trackStock ? ' checked' : '') + '> 在庫を管理する</label>' +
       '<label id="pMinLabel"><span id="pMinText"></span><input name="minStock" type="text" inputmode="decimal" value="' +
       (d.minStock ? (d.unit === 'g' ? d.minStock / 1000 : d.minStock) : '') + '" placeholder="例：' + (d.unit === 'g' ? '2' : '10') + '"></label>' +
+      '<label id="pParLabel"><span id="pParText"></span><input name="parStock" type="text" inputmode="decimal" value="' +
+      (d.parStock ? (d.unit === 'g' ? d.parStock / 1000 : d.parStock) : '') + '" placeholder="空欄なら発注点の2倍"></label>' +
+      '<label id="pSupLabel">仕入先（発注書で使います）<input name="supplier" value="' + esc(d.supplier || '') + '" autocomplete="off"></label>' +
       '<label>税率<div class="seg" id="pTax">' +
       '<button type="button" class="btn small" data-tax="8">8%（食品・持ち帰り）</button>' +
       '<button type="button" class="btn small" data-tax="10">10%（レジ袋など）</button></div></label>' +
@@ -1069,6 +1342,9 @@ Store.init().then(function () {
           d.trackStock = d.unit !== 'open' && f.elements.trackStock.checked;
           var minv = parseFloat(f.elements.minStock.value || '0') || 0;
           d.minStock = d.unit === 'g' ? Math.round(minv * 1000) : Math.round(minv);
+          var parv = parseFloat(f.elements.parStock.value || '0') || 0;
+          d.parStock = d.unit === 'g' ? Math.round(parv * 1000) : Math.round(parv);
+          d.supplier = f.elements.supplier.value.trim();
           if (isNew) {
             d.id = Store.newId('p');
             d.order = products.reduce(function (m, x) { return Math.max(m, x.order); }, 0) + 1;
@@ -1094,6 +1370,9 @@ Store.init().then(function () {
       $('pWsLabel').style.display = open ? 'none' : '';
       $('pTrackLabel').style.display = open ? 'none' : '';
       $('pMinLabel').style.display = open ? 'none' : '';
+      $('pParLabel').style.display = open ? 'none' : '';
+      $('pSupLabel').style.display = open ? 'none' : '';
+      $('pParText').textContent = '適正在庫：発注するときの目安の量（' + (d.unit === 'g' ? 'kg' : '個') + '）';
       $('pWsText').textContent = d.unit === 'g' ? '卸単価（1kgあたり・税抜・円）' : '卸単価（1個あたり・税抜・円）';
       $('pMinText').textContent = '発注点：在庫がこれを下回ったら知らせる（' + (d.unit === 'g' ? 'kg' : '個') + '）';
     }
@@ -1363,6 +1642,7 @@ Store.init().then(function () {
           r.deposit = dep;
           r.depositMethod = depMethod;
           r.depositDate = today;
+          r.depositDev = myDev();
         } else {
           r.deposit = 0;
         }
@@ -1413,7 +1693,7 @@ Store.init().then(function () {
         var x = list.find(function (y) { return y.id === r.id; });
         x.status = 'cancelled';
         x.cancelledAt = new Date().toISOString();
-        if (b.dataset.act === 'refund') x.depositRefundDate = localDate(new Date());
+        if (b.dataset.act === 'refund') { x.depositRefundDate = localDate(new Date()); x.refundDev = myDev(); }
         saveResvList(list);
         closeModal();
         renderReservations();
@@ -1479,7 +1759,8 @@ Store.init().then(function () {
   // ================= 設定 =================
   function renderSettings() {
     var f = $('settingsForm');
-    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax'].forEach(function (k) { f.elements[k].value = settings[k]; });
+    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax', 'floatDefault'].forEach(function (k) { f.elements[k].value = settings[k] == null ? '' : settings[k]; });
+    f.elements.cashlessTypes.value = cashlessTypes().join(',');
     f.elements.categories.value = settings.categories.join(',');
     f.autoPrint.checked = !!settings.autoPrint;
     var counts = '店頭の売上 ' + num(Store.getSales().length) + '件・予約 ' + num(Store.getReservations().length) +
@@ -1534,16 +1815,22 @@ Store.init().then(function () {
 
   $('settingsForm').addEventListener('submit', function (e) {
     e.preventDefault();
-    var f = this;
+    var form = this;
+    POS.requirePerm('settings', '設定の変更').then(function (ok) { if (ok) saveSettingsForm(form); });
+  });
+  function saveSettingsForm(f) {
     ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax'].forEach(function (k) { settings[k] = f.elements[k].value.trim(); });
     settings.feeMax = Math.max(0, Math.floor(Number(settings.feeMax) || 0));
+    settings.floatDefault = Math.max(0, Math.floor(Number(f.elements.floatDefault.value) || 0));
+    settings.cashlessTypes = f.elements.cashlessTypes.value.split(/[,、，]/).map(function (x) { return x.trim(); }).filter(Boolean);
     settings.categories = f.elements.categories.value.split(/[,、，]/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!settings.categories.length) settings.categories = ['その他'];
     settings.autoPrint = f.autoPrint.checked;
     Store.saveSettings(settings);
+    POS.log('settings', '店舗・レシート設定を保存');
     applyStoreName();
     toast('設定を保存しました');
-  });
+  }
 
   $('btnBackup').addEventListener('click', function () {
     var data = JSON.stringify(Store.exportAll());
@@ -1554,6 +1841,9 @@ Store.init().then(function () {
     var file = this.files[0];
     this.value = '';
     if (!file) return;
+    POS.requirePerm('settings', 'バックアップから復元').then(function (ok) { if (ok) restoreFrom(file); });
+  });
+  function restoreFrom(file) {
     if (!confirm('現在のデータ（商品・設定・売上・予約・卸・在庫）をバックアップの内容で置き換えます。よろしいですか？')) return;
     var reader = new FileReader();
     reader.onload = function () {
@@ -1567,9 +1857,12 @@ Store.init().then(function () {
       });
     };
     reader.readAsText(file);
-  });
+  }
 
   $('btnPurge').addEventListener('click', function () {
+    POS.requirePerm('settings', '古い売上の削除').then(function (ok) { if (ok) purgeOld(); });
+  });
+  function purgeOld() {
     var d = new Date();
     d.setFullYear(d.getFullYear() - 1);
     var input = prompt('この日付より前の売上を削除します（YYYY-MM-DD）。\n先にバックアップを保存することをおすすめします。', localDate(d));
@@ -1581,7 +1874,7 @@ Store.init().then(function () {
     Store.removeSalesBefore(input);
     renderSettings();
     toast(removed + '件削除しました');
-  });
+  }
 
   function isStandalone() {
     return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -1657,6 +1950,22 @@ Store.init().then(function () {
     stockChange: stockChange,
     trackedMap: trackedMap,
     views: {},
+    salesTabs: {},
+    myDev: myDev,
+    staffName: staffName,
+    noOf: noOf,
+    cashlessTypes: cashlessTypes,
+    receiptHtml: function (sale, reprint) { return receiptHtml(sale, reprint); },
+    summarize: function (date) { return summarize(date); },
+    renderSalesTab: function () { renderSalesTab(); },
+    keypadHtml: keypadHtml,
+    applyKey: applyKey,
+    hooks: function () { return modalHooks; },
+    saveSettings: function () { Store.saveSettings(settings); },
+    // 担当者の権限（staff.js で置き換える。担当者を使わないときは常に許可）
+    requirePerm: function (action, label) { return Promise.resolve(true); },
+    log: function () {},
+    currentStaff: function () { return null; },
     addBadge: function (f) { badgeFns.push(f); },
     refreshBadges: refreshBadges,
     showView: showView

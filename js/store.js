@@ -18,6 +18,7 @@
     rseq: 'nikupos.rseq',     // 予約No
     wseq: 'nikupos.wseq',     // 卸伝票No
     iseq: 'nikupos.iseq',     // 請求書No
+    oseq: 'nikupos.oseq',     // 発注書No
     // 旧バージョン（localStorageに保存していた頃）のキー
     legacySales: 'nikupos.sales',
     legacyReservations: 'nikupos.reservations'
@@ -69,7 +70,7 @@
     deviceCode: ''     // この端末の記号（複数端末で使うとき、番号の頭に付ける）
   };
   // 全端末で共通にする設定（それ以外はこの端末だけの設定）
-  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct'];
+  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct', 'cashlessTypes', 'promos', 'staff', 'permissions'];
 
   // ---------- localStorage ----------
   function read(key, fallback) {
@@ -115,8 +116,9 @@
 
   // ---------- IndexedDB ----------
   var DB_NAME = 'nikupos';
-  var DB_VERSION = 1;
-  var COLLECTIONS = ['sales', 'reservations', 'customers', 'wholesale', 'invoices', 'receipts', 'moves'];
+  var DB_VERSION = 2; // 2: 入出金・レジ締め・操作ログ・発注書を追加
+  var COLLECTIONS = ['sales', 'reservations', 'customers', 'wholesale', 'invoices', 'receipts', 'moves',
+    'cashmoves', 'closings', 'logs', 'orders'];
   var db = null;
 
   function openDB() {
@@ -416,6 +418,17 @@
       return stockMemo.value;
     },
     getMoves: function () { return C.moves.all(); },
+
+    // 入出金・レジ締め・操作ログ・発注書
+    getCashMoves: function () { return C.cashmoves.all(); },
+    addCashMove: function (m) { return C.cashmoves.add(m); },
+    saveCashMoves: function (list) { return C.cashmoves.saveAll(list); },
+    getClosings: function () { return C.closings.all(); },
+    addClosing: function (x) { return C.closings.add(x); },
+    getLogs: function () { return C.logs.all(); },
+    addLog: function (x) { return C.logs.add(x); },
+    getOrders: function () { return C.orders.all(); },
+    saveOrders: function (list) { return C.orders.saveAll(list); },
     addMoves: function (list) { list.forEach(function (m) { C.moves.add(m); }); },
 
     // ---------- クラウド同期用 ----------
@@ -498,7 +511,7 @@
         settings: Store.getSettings(),
         counters: {}
       };
-      ['seq', 'rseq', 'wseq', 'iseq'].forEach(function (k) { data.counters[k] = read(KEY[k], 0); });
+      ['seq', 'rseq', 'wseq', 'iseq', 'oseq'].forEach(function (k) { data.counters[k] = read(KEY[k], 0); });
       COLLECTIONS.forEach(function (n) { data[n] = C[n].all(); });
       return data;
     },
@@ -510,7 +523,7 @@
       s.deviceCode = keepLocal.deviceCode; // 端末の記号はこの端末のものを使う
       write(KEY.settings, s);
       var counters = data.counters || { seq: data.seq, rseq: data.rseq }; // version 1 との互換
-      ['seq', 'rseq', 'wseq', 'iseq'].forEach(function (k) { write(KEY[k], counters[k] || 0); });
+      ['seq', 'rseq', 'wseq', 'iseq', 'oseq'].forEach(function (k) { write(KEY[k], counters[k] || 0); });
       if (data.stock) write(KEY.legacyStock, data.stock); // version 2 の在庫数 → 棚卸の記録に変換
       return Promise.all(COLLECTIONS.map(function (n) { return C[n].replaceAll(data[n] || []); })).then(migrateStock);
     },

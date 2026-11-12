@@ -455,3 +455,49 @@ tr.void td.act { text-decoration: none; }
 
 /* 得意先元帳は表が横に広いので、画面を広く使う */
 .modal:has(#lgBody) { max-width: 920px; }
+
+/* ---------- レジ締め ---------- */
+.denoms { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.denoms label { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: auto auto; align-items: center; gap: 2px 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+.denoms label > span:first-child { font-weight: 700; }
+.denoms input { min-height: 40px; text-align: right; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; width: 100%; }
+.denoms .note { grid-column: 2; text-align: right; font-size: 12px; }
+
+/* ---------- タイムセール ---------- */
+.p-promo { align-self: flex-start; margin: 2px 0; padding: 1px 6px; border-radius: 4px; background: #fff1d6; color: #8a5a00; font-size: 11px; font-weight: 700;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; max-height: 220px; overflow-y: auto;
+  padding: 6px; border: 1px solid var(--line); border-radius: 8px; }
+
+/* ---------- 担当者 ---------- */
+.staff-chip { flex: none; border: 1px solid rgba(255,255,255,.6); background: rgba(255,255,255,.15); color: #fff; border-radius: 999px;
+  padding: 4px 10px; font-size: 13px; font-weight: 700; cursor: pointer; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.staff-chip[hidden] { display: none; }
+@media (max-width: 400px) { .staff-chip { padding: 3px 7px; font-size: 12px; max-width: 5em; } }
+
+/* ---------- 売上分析 ---------- */
+.note.up { color: var(--ok); }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; margin: 10px 0; }
+.chart-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; min-width: 0; }
+.chart-title { font-weight: 700; }
+.chart-read { color: var(--muted); font-size: 13px; min-height: 1.4em; margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+.cols { display: flex; align-items: stretch; gap: 2px; height: 170px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.col { flex: 1 0 18px; display: flex; flex-direction: column; align-items: center; cursor: pointer; min-width: 18px; }
+.col-val { font-size: 11px; color: var(--ink); height: 16px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.col-bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.col-bar { width: 100%; max-width: 24px; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 0; }
+.col.sel .col-bar, .col:hover .col-bar { background: #8f2f18; }
+.col-label { font-size: 11px; color: var(--muted); height: 18px; line-height: 18px; white-space: nowrap; }
+.chart-table { margin-top: 6px; font-size: 13px; }
+.chart-table summary { color: var(--muted); cursor: pointer; }
+.hbar { display: grid; grid-template-columns: minmax(70px, 34%) 1fr auto; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }
+.hbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-track { height: 14px; }
+.hbar-fill { display: block; height: 14px; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbar-val { white-space: nowrap; }
+@media (max-width: 400px) {
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card .v { font-size: 20px; }
+  .denoms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

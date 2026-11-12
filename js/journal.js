@@ -34,7 +34,9 @@
       deposit: '前受金',
       fee: '支払手数料',
       purchase: '仕入高',
-      ap: '買掛金'
+      ap: '買掛金',
+      miscLoss: '雑損失',
+      miscGain: '雑収入'
     },
     // マネーフォワードの税区分名（「税区分」画面の名称に合わせて変更可能。合わない場合は取り込み時に変換画面が出る）
     mfTax: {
@@ -172,6 +174,27 @@
           } else {
             add(entry(date, '売掛金入金 ' + name + (r.note ? ' ' + r.note : ''), [side(r.method === 'cash' ? A.cash : A.bank, r.amount, { partner: name })], [cr]));
           }
+        });
+      }
+      // ---- 入出金・レジの過不足 ----
+      if (inc.cash) {
+        (data.cashmoves || []).forEach(function (m) {
+          if (m.date !== date || !m.amount || !m.account) return;
+          var tax = m.taxRate ? { type: 'purchase', rate: m.taxRate, amount: Math.floor((m.amount * m.taxRate) / (100 + m.taxRate)) } : null;
+          if (m.kind === 'out') add(entry(date, '出金 ' + (m.memo || m.account), [side(m.account, m.amount, { tax: tax })], [side(A.cash, m.amount)]));
+          if (m.kind === 'in') add(entry(date, '入金 ' + (m.memo || m.account), [side(A.cash, m.amount)], [side(m.account, m.amount)]));
+        });
+        // 1日・1端末につき最後の精算の過不足
+        var last = {};
+        (data.closings || []).forEach(function (c) {
+          if (c.date !== date) return;
+          var k = c.dev || '';
+          if (!last[k] || last[k].at < c.at) last[k] = c;
+        });
+        Object.keys(last).forEach(function (k) {
+          var c = last[k];
+          if (c.diff < 0) add(entry(date, '現金過不足（不足）' + (k ? ' 端末' + k : ''), [side(A.miscLoss, -c.diff)], [side(A.cash, -c.diff)]));
+          if (c.diff > 0) add(entry(date, '現金過不足（過剰）' + (k ? ' 端末' + k : ''), [side(A.cash, c.diff)], [side(A.miscGain, c.diff)]));
         });
       }
       // ---- 仕入（入荷で仕入単価を入れたもの・仕入先ごと） ----

@@ -124,3 +124,23 @@ test('Shift-JIS：日本語・半角カナ・記号を正しく変換し、表�
   assert.equal(back.replace('～', '〜'), '鶏もも肉,ｶﾗｱｹﾞ,課税売上込軽減8%,－,〜,\\,?');
   assert.deepEqual(Array.from(J.encodeSJIS('鶏')), [0x8C, 0x7B]);
 });
+
+test('入出金と現金過不足の仕訳', () => {
+  const es = J.buildJournals({
+    cashmoves: [
+      { date: '2026-11-12', kind: 'out', amount: 880, account: '消耗品費', taxRate: 10, memo: 'ラップ' },
+      { date: '2026-11-12', kind: 'in', amount: 10000, account: '普通預金' },
+      { date: '2026-11-12', kind: 'float', amount: 30000 },
+      { date: '2026-11-12', kind: 'exchange', amount: 5000 }
+    ],
+    closings: [
+      { date: '2026-11-12', dev: 'A', at: '2026-11-12T10:00:00Z', diff: -500 },
+      { date: '2026-11-12', dev: 'A', at: '2026-11-12T11:00:00Z', diff: -1010 },
+      { date: '2026-11-12', dev: 'B', at: '2026-11-12T11:00:00Z', diff: 30 }
+    ]
+  }, { from: '2026-11-12', to: '2026-11-12', include: { cash: true } });
+  assert.deepEqual(es.map(e => [e.debits[0].acct, e.credits[0].acct, e.debits[0].amount]), [
+    ['消耗品費', '現金', 880], ['現金', '普通預金', 10000], ['雑損失', '現金', 1010], ['現金', '雑収入', 30]
+  ]);
+  assert.deepEqual(es[0].debits[0].tax, { type: 'purchase', rate: 10, amount: 80 });
+});

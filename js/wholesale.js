@@ -478,7 +478,7 @@
       s.lines = newLines;
       s.totals = Calc.wsTotals(newLines, round());
       s.status = status;
-      if (status === 'delivered' && !wasDelivered) s.deliveredAt = new Date().toISOString();
+      if (status === 'delivered' && !wasDelivered) { s.deliveredAt = new Date().toISOString(); s.deliveredDev = settings().deviceCode || ''; }
 
       var list = Store.getSlips();
       if (isNew) {
@@ -664,10 +664,10 @@
           if (!(amount > 0)) { alert('金額を入力してください'); return; }
           var list = Store.getReceipts();
           var date = f.date.value || today();
-          list.push({ id: Store.newId('P'), customerId: f.customer.value, date: date, amount: amount, method: method, note: f.note.value.trim() });
+          list.push({ id: Store.newId('P'), dev: settings().deviceCode || '', customerId: f.customer.value, date: date, amount: amount, method: method, note: f.note.value.trim() });
           var fee = $('rcFee').checked ? feeDiff() : 0;
           if (fee) {
-            list.push({ id: Store.newId('P'), customerId: f.customer.value, date: date, amount: fee, method: 'fee', note: f.note.value.trim() });
+            list.push({ id: Store.newId('P'), dev: settings().deviceCode || '', customerId: f.customer.value, date: date, amount: fee, method: 'fee', note: f.note.value.trim() });
           }
           Store.saveReceipts(list);
           POS.closeModal();
@@ -799,7 +799,7 @@
     if (!st || st.remaining <= 0) return;
     if (!confirm(i.customerName + ' の ' + i.periodTo + '締め分 ' + yen(st.remaining) + ' を、今日の振込入金として登録しますか？')) return;
     var list = Store.getReceipts();
-    list.push({ id: Store.newId('P'), customerId: i.customerId, date: today(), amount: st.remaining, method: 'transfer', note: monthMemo(i) });
+    list.push({ id: Store.newId('P'), dev: settings().deviceCode || '', customerId: i.customerId, date: today(), amount: st.remaining, method: 'transfer', note: monthMemo(i) });
     Store.saveReceipts(list);
     render();
     POS.toast('入金を登録しました');
@@ -811,7 +811,7 @@
     if (!st || st.remaining <= 0) return;
     if (!confirm(i.customerName + ' の ' + i.periodTo + '締め分の残り ' + yen(st.remaining) + ' を、振込手数料（当方負担）として処理しますか？\n売掛金から差し引きます（現金・振込の入金には数えません）。')) return;
     var list = Store.getReceipts();
-    list.push({ id: Store.newId('P'), customerId: i.customerId, date: today(), amount: st.remaining, method: 'fee', note: monthMemo(i) });
+    list.push({ id: Store.newId('P'), dev: settings().deviceCode || '', customerId: i.customerId, date: today(), amount: st.remaining, method: 'fee', note: monthMemo(i) });
     Store.saveReceipts(list);
     render();
     POS.toast('振込手数料として処理しました');

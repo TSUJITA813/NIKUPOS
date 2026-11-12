@@ -28,6 +28,7 @@
         <button class="tab" data-view="products">商品</button>
         <button class="tab" data-view="settings">設定</button>
       </nav>
+      <button class="staff-chip" id="staffChip" hidden aria-label="担当者の切り替え"></button>
       <button class="sync-dot" id="syncDot" hidden aria-label="同期の状態"></button>
       <div class="clock" id="clock"></div>
     </header>
@@ -99,6 +100,14 @@
     <!-- 売上 -->
     <main id="view-sales" class="view">
       <div class="page">
+        <div class="subtabs" id="salesTabs">
+          <button class="btn on" data-stab="day">日別の売上</button>
+          <button class="btn" data-stab="close">レジ締め</button>
+          <button class="btn" data-stab="cash">入出金</button>
+          <button class="btn" data-stab="analysis">分析</button>
+          <button class="btn" data-stab="log">操作ログ</button>
+        </div>
+        <div id="salesDay">
         <div class="toolbar">
           <button class="btn small" id="btnPrevDay">◀</button>
           <input type="date" id="salesDate">
@@ -109,12 +118,16 @@
           <button class="btn small primary" id="btnAccounting">会計ソフトへ書き出す</button>
         </div>
         <div id="salesSummary"></div>
+        </div>
+        <div id="salesPane" hidden></div>
       </div>
     </main>
 
     <!-- 商品 -->
     <main id="view-products" class="view">
       <div class="page">
+        <h2>タイムセール・まとめ売り</h2>
+        <div id="promoBox"></div>
         <div class="toolbar">
           <h2>商品マスタ</h2>
           <span class="spacer"></span>
@@ -134,6 +147,8 @@
           <label>電話番号<input name="tel" inputmode="tel" autocomplete="off"></label>
           <label>インボイス登録番号<input name="invoiceNo" placeholder="T1234567890123" autocomplete="off"></label>
           <label>レシート末尾メッセージ<textarea name="footer" rows="2"></textarea></label>
+          <label>キャッシュレスの種類（カンマ区切り。会計とレジ締めで使います）<input name="cashlessTypes" autocomplete="off" placeholder="クレジット,電子マネー,QR決済"></label>
+          <label>釣銭準備金の初期値（円・この端末）<input name="floatDefault" type="number" inputmode="numeric" min="0" step="1"></label>
           <label>振込手数料として処理できる差額の上限（円）<input name="feeMax" type="number" inputmode="numeric" min="0" step="1"></label>
           <label>振込先（卸の請求書に記載）<textarea name="bankInfo" rows="2" placeholder="例：○○銀行 △△支店 普通 1234567 ﾄﾘﾆｸﾉﾐｾ"></textarea></label>
           <label>商品カテゴリ（カンマ区切り）<input name="categories" autocomplete="off"></label>
@@ -170,6 +185,9 @@
           <div id="scaleSettings"></div>
           <button class="btn primary" type="submit">保存</button>
         </form>
+
+        <h2>担当者と権限</h2>
+        <div id="staffSettings"></div>
 
         <h2>複数の端末で共有（クラウド同期）</h2>
         <div id="syncSettings"></div>
@@ -208,6 +226,10 @@
   <script src="js/sync.js"></script>
   <script src="js/journal.js"></script>
   <script src="js/accounting.js"></script>
+  <script src="js/regops.js"></script>
+  <script src="js/promos.js"></script>
+  <script src="js/staff.js"></script>
+  <script src="js/analysis.js"></script>
   <script src="js/inventory.js"></script>
   <script src="js/wholesale.js"></script>
   <script src="js/app.js"></script>
