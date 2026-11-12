@@ -548,3 +548,10 @@ button.display.tap:not(.target) .value { opacity: .85; }
   #prodSearch, #prodSearch:focus { width: 100%; }
   .cat-bar .cat-tabs { flex-basis: 100%; padding: 8px 0 10px; }
 }
+
+/* 狭い画面で支払い方法・キャッシュレスの種類の文字が折れないように */
+@media (max-width: 400px) {
+  .modal .seg .btn { white-space: nowrap; padding-left: 2px; padding-right: 2px; font-size: 15px; }
+  .modal .seg .btn.small { font-size: 13px; }
+}
+.display .value.placeholder { font-size: 18px; font-weight: 700; color: var(--muted); }

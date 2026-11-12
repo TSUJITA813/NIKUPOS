@@ -373,10 +373,22 @@ Store.init().then(function () {
     Store.saveHolds(list.filter(function (x) { return x.id !== id; }));
     cart = h.cart;
     cart.lines.forEach(function (l) { l.key = 'L' + (lineSeq++); });
+    unlinkStaleReservation();
     POS.log('hold', '保留を呼び出し ' + yen(holdTotal(cart)) + (h.memo ? '（' + h.memo + '）' : ''));
   }
   function holdName(h, i) {
     return h.cart.customer ? h.cart.customer + ' 様（予約）' : h.memo || '保留 ' + (i + 1);
+  }
+  /** カートの予約が、すでに会計済み・取消になっていたら、予約とのつながり（前受金）を外す */
+  function unlinkStaleReservation() {
+    if (!cart.reservationId) return false;
+    var r = Store.getReservations().find(function (x) { return x.id === cart.reservationId; });
+    if (r && Calc.isActiveReservation(r)) return false;
+    var no = cart.reservationNo;
+    delete cart.reservationId; delete cart.reservationNo; delete cart.customer; delete cart.deposit;
+    alert('予約No.' + no + ' は、すでに' + (r && r.status === 'cancelled' ? '取り消されて' : r ? '会計されて' : '削除されて') +
+      'います。予約とは別の、ふつうの会計として扱います（前受金は差し引きません）。');
+    return true;
   }
   function openHoldModal() {
     var list = Store.getHolds();
@@ -750,6 +762,7 @@ Store.init().then(function () {
   // ---------- 会計 ----------
   function openPayModal() {
     if (!cart.lines.length) return;
+    if (unlinkStaleReservation()) { saveCart(); return; }
     if (cart.lines.some(function (l) { return l.estimated; }) &&
       !confirm('予約時の予定重量のままの商品があります。このまま会計しますか？\n（実際の重さに直すには、カートの商品をタップ）')) return;
     $('cartPanel').classList.remove('open');
@@ -786,6 +799,7 @@ Store.init().then(function () {
       $('mClRow').classList.toggle('target', split && target === 'cl');
       if (split) {
         $('mCl').textContent = clVal ? yen(p.cashless) : '金額を入力';
+        $('mCl').classList.toggle('placeholder', !clVal);
         $('mClLabel').textContent = ctype + 'で';
         $('mCashDue').textContent = yen(p.cash);
         $('mQuick').innerHTML = target === 'cash' && p.cash > 0 ? quickHtml(p.cash) : '';
@@ -1747,6 +1761,17 @@ Store.init().then(function () {
 
   /** 予約をレジに読み込む */
   function loadReservationToCart(r) {
+    // 同じ予約を保留中なら、新しく読み込まずに保留から呼び出す（二重の会計を防ぐ）
+    var held = Store.getHolds().find(function (h) { return h.cart.reservationId === r.id; });
+    if (held) {
+      if (!confirm('この予約は会計の保留中です。保留から呼び出しますか？' + (cart.lines.length ? '\n（今の会計は保留にします）' : ''))) return;
+      if (cart.lines.length) holdCurrent('');
+      recallHold(held.id);
+      saveCart();
+      showView('register');
+      if (isNarrow()) $('cartPanel').classList.add('open');
+      return;
+    }
     if (cart.lines.length && cart.reservationId !== r.id &&
       !confirm('レジに会計途中の商品があります。予約の内容に置き換えますか？')) return;
     cart = {
