@@ -9,7 +9,9 @@
     settings: 'nikupos.settings',
     sales: 'nikupos.sales',
     seq: 'nikupos.seq',
-    cart: 'nikupos.cart'
+    cart: 'nikupos.cart',
+    reservations: 'nikupos.reservations',
+    rseq: 'nikupos.rseq'
   };
 
   // unit: 'g' = 100gあたり単価, 'pc' = 1個あたり単価, 'open' = 都度金額入力
@@ -46,7 +48,9 @@
     categories: ['生肉', '惣菜', 'その他'],
     rounding: 'floor',
     paperWidth: '58',
-    autoPrint: false
+    autoPrint: false,
+    scaleMode: 'none', // 'none' | 'keyboard' | 'bluetooth'
+    scaleUnit: 'g'     // はかりが単位を送らない場合の単位
   };
 
   function read(key, fallback) {
@@ -88,6 +92,13 @@
       write(KEY.seq, n);
       return n;
     },
+    getReservations: function () { return read(KEY.reservations, []); },
+    saveReservations: function (list) { return write(KEY.reservations, list); },
+    nextReservationNo: function () {
+      var n = (read(KEY.rseq, 0) || 0) + 1;
+      write(KEY.rseq, n);
+      return n;
+    },
     getCart: function () { return read(KEY.cart, null); },
     saveCart: function (cart) { return write(KEY.cart, cart); },
 
@@ -99,7 +110,9 @@
         products: Store.getProducts(),
         settings: Store.getSettings(),
         sales: Store.getSales(),
-        seq: read(KEY.seq, 0)
+        seq: read(KEY.seq, 0),
+        reservations: Store.getReservations(),
+        rseq: read(KEY.rseq, 0)
       };
     },
     importAll: function (data) {
@@ -108,6 +121,8 @@
       write(KEY.settings, data.settings || clone(DEFAULT_SETTINGS));
       write(KEY.sales, data.sales || []);
       write(KEY.seq, data.seq || 0);
+      write(KEY.reservations, data.reservations || []);
+      write(KEY.rseq, data.rseq || 0);
     },
     usageBytes: function () {
       var total = 0;
