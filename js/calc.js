@@ -123,6 +123,33 @@
     return { deposit: 0, cash: sale.method === 'cash' ? t : 0, cashless: sale.method === 'cash' ? 0 : t };
   }
 
+  /** 検索用に文字をそろえる（全角・半角、カタカナ→ひらがな、大文字→小文字、空白を除く） */
+  function searchKey(s) {
+    s = String(s || '');
+    if (s.normalize) s = s.normalize('NFKC');
+    return s.toLowerCase().replace(/[\u30a1-\u30f6]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0x60); }).replace(/\s+/g, '');
+  }
+  // 鶏肉店でよく使う漢字の読み（よみを登録していない商品も、ひらがなで探せるように）
+  var READINGS = [
+    ['手羽中', 'てばなか'], ['手羽先', 'てばさき'], ['手羽元', 'てばもと'], ['手羽', 'てば'], ['焼き鳥', 'やきとり'], ['焼鳥', 'やきとり'],
+    ['唐揚げ', 'からあげ'], ['唐揚', 'からあげ'], ['砂肝', 'すなぎも'], ['骨付き', 'ほねつき'], ['骨付', 'ほねつき'], ['鶏ガラ', 'とりがら'],
+    ['挽肉', 'ひきにく'], ['挽き肉', 'ひきにく'], ['合挽', 'あいびき'], ['鶏', 'とり'], ['肉', 'にく'], ['胸', 'むね'], ['腿', 'もも'],
+    ['皮', 'かわ'], ['肝', 'きも'], ['心臓', 'はつ'], ['軟骨', 'なんこつ'], ['卵', 'たまご'], ['玉子', 'たまご'], ['丸', 'まる'],
+    ['豚', 'ぶた'], ['牛', 'ぎゅう'], ['鴨', 'かも'], ['串', 'くし'], ['袋', 'ふくろ'], ['個', 'こ'], ['羽', 'わ'], ['味付', 'あじつけ'],
+    ['塩', 'しお'], ['揚', 'あげ'], ['焼', 'やき'], ['煮', 'に'], ['惣菜', 'そうざい'], ['生', 'なま'], ['冷凍', 'れいとう'], ['国産', 'こくさん']
+  ];
+  function autoReading(name) {
+    var r = String(name || '');
+    READINGS.forEach(function (x) { r = r.split(x[0]).join(x[1]); });
+    return r;
+  }
+  /** 商品が検索語に合うか（名前・よみ・商品コード・カテゴリ。漢字の名前はよくある読みでも探せる） */
+  function matchProduct(p, q) {
+    var k = searchKey(q);
+    if (!k) return true;
+    return [p.name, p.kana, p.code, p.category, autoReading(p.name)].some(function (v) { return v && searchKey(v).indexOf(k) >= 0; });
+  }
+
   function isActiveReservation(r) { return r.status === 'reserved' || r.status === 'ready'; }
 
   /** 予約の概算金額（グラム売りは予定重量で計算） */
@@ -716,6 +743,8 @@
     payments: payments,
     salePayments: salePayments,
     isActiveReservation: isActiveReservation,
+    searchKey: searchKey,
+    matchProduct: matchProduct,
     reservationEstimate: reservationEstimate,
     prepSummary: prepSummary,
     summarizeDay: summarizeDay

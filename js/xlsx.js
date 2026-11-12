@@ -74,8 +74,13 @@
    */
   function writeXlsx(rows, opts) {
     opts = opts || {};
-    var sheetName = esc(opts.sheetName || 'Sheet1').slice(0, 31);
-    var widths = opts.widths || [];
+    return writeXlsxBook([{ rows: rows, name: opts.sheetName, widths: opts.widths, title: opts.title, landscape: opts.landscape }]);
+  }
+
+  /** 1枚のシートの XML */
+  function sheetXml(sh) {
+    var rows = sh.rows;
+    var widths = sh.widths || [];
     var ncol = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
     var sheetRows = rows.map(function (r, ri) {
       return '<row r="' + (ri + 1) + '">' + r.map(function (v, ci) {
@@ -86,18 +91,31 @@
       }).join('') + '</row>';
     }).join('');
     var lastRef = colName(Math.max(0, ncol - 1)) + Math.max(1, rows.length);
-    var sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
       '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:' + lastRef + '"/>' +
-      '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+      '<sheetViews><sheetView workbookViewId="0"' + (sh.index === 0 ? ' tabSelected="1"' : '') + '><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
       '<sheetFormatPr defaultRowHeight="18"/>' +
       (widths.length ? '<cols>' + widths.map(function (w, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>'; }).join('') + '</cols>' : '') +
       '<sheetData>' + sheetRows + '</sheetData>' +
       '<autoFilter ref="A1:' + lastRef + '"/>' +
       '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>' +
-      '<pageSetup paperSize="9" orientation="' + (opts.landscape ? 'landscape' : 'portrait') + '" fitToWidth="1" fitToHeight="0"/>' +
-      (opts.title ? '<headerFooter><oddHeader>&amp;C' + esc(opts.title) + '</oddHeader><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter>' : '') +
+      '<pageSetup paperSize="9" orientation="' + (sh.landscape ? 'landscape' : 'portrait') + '" fitToWidth="1" fitToHeight="0"/>' +
+      (sh.title ? '<headerFooter><oddHeader>&amp;C' + esc(sh.title) + '</oddHeader><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter>' : '') +
       '</worksheet>';
+    return { xml: xml, lastRef: lastRef };
+  }
+
+  /** 複数シートのブック。sheets: [{name, rows, widths, title, landscape}] */
+  function writeXlsxBook(sheets) {
+    var used = {};
+    var list = sheets.map(function (sh, i) {
+      var name = String(sh.name || 'Sheet' + (i + 1)).replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31);
+      while (used[name]) name = name.slice(0, 28) + '_' + (i + 1);
+      used[name] = true;
+      var x = sheetXml(Object.assign({}, sh, { index: i }));
+      return { name: esc(name), xml: x.xml, lastRef: x.lastRef };
+    });
     var styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.###"/></numFmts>' +
@@ -115,16 +133,20 @@
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
     var workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      '<sheets><sheet name="' + sheetName + '" sheetId="1" r:id="rId1"/></sheets>' +
-      '<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">\'' + sheetName + '\'!$A$1:$' + lastRef.replace(/(\d+)$/, '$$$1') + '</definedName>' +
-      '<definedName name="_xlnm.Print_Titles" localSheetId="0">\'' + sheetName + '\'!$1:$1</definedName></definedNames></workbook>';
+      '<sheets>' + list.map(function (sh, i) { return '<sheet name="' + sh.name + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') + '</sheets>' +
+      '<definedNames>' + list.map(function (sh, i) {
+        return '<definedName name="_xlnm._FilterDatabase" localSheetId="' + i + '" hidden="1">\'' + sh.name + '\'!$A$1:$' + sh.lastRef.replace(/(\d+)$/, '$$$1') + '</definedName>';
+      }).join('') + list.map(function (sh, i) {
+        return '<definedName name="_xlnm.Print_Titles" localSheetId="' + i + '">\'' + sh.name + '\'!$1:$1</definedName>';
+      }).join('') + '</definedNames></workbook>';
+    var n = list.length;
     return zipStore([
       { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
         '<Default Extension="xml" ContentType="application/xml"/>' +
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        list.map(function (sh, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') +
         '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
       { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
@@ -132,11 +154,10 @@
       { name: 'xl/workbook.xml', data: workbook },
       { name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
-        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
-      { name: 'xl/worksheets/sheet1.xml', data: sheet },
-      { name: 'xl/styles.xml', data: styles }
-    ]);
+        list.map(function (sh, i) { return '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>'; }).join('') +
+        '<Relationship Id="rId' + (n + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' }
+    ].concat(list.map(function (sh, i) { return { name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: sh.xml }; }))
+      .concat([{ name: 'xl/styles.xml', data: styles }]));
   }
 
   // ---------- 読み込み ----------
@@ -276,7 +297,7 @@
     try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { return new TextDecoder('shift_jis').decode(bytes); }
   }
 
-  var XLSX = { writeXlsx: writeXlsx, readXlsx: readXlsx, parseSheet: parseSheet, parseCsv: parseCsv, decodeCsv: decodeCsv, crc32: crc32, colName: colName };
+  var XLSX = { writeXlsx: writeXlsx, writeXlsxBook: writeXlsxBook, readXlsx: readXlsx, parseSheet: parseSheet, parseCsv: parseCsv, decodeCsv: decodeCsv, crc32: crc32, colName: colName };
   if (typeof module !== 'undefined' && module.exports) module.exports = XLSX;
   else root.XLSX = XLSX;
 })(this);

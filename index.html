@@ -36,7 +36,8 @@
     <!-- レジ -->
     <main id="view-register" class="view active">
       <section class="catalog">
-        <div class="cat-tabs" id="catTabs"></div>
+        <div class="cat-bar"><input type="search" id="prodSearch" placeholder="🔍 商品を検索" autocomplete="off" enterkeyhint="search" aria-label="商品を検索">
+          <div class="cat-tabs" id="catTabs"></div></div>
         <div class="product-grid" id="productGrid"></div>
       </section>
       <aside class="cart" id="cartPanel">
@@ -116,7 +117,7 @@
           <button class="btn small" id="btnNextDay">▶</button>
           <span class="spacer"></span>
           <button class="btn small" id="btnPrintReport">精算レポート印刷</button>
-          <button class="btn small" id="btnExportCsv">CSV出力</button>
+          <button class="btn small" id="btnExportCsv">期間で書き出す</button>
           <button class="btn small primary" id="btnAccounting">会計ソフトへ書き出す</button>
         </div>
         <div id="salesSummary"></div>
@@ -255,6 +256,7 @@
   <script src="js/journal.js"></script>
   <script src="js/pricing.js"></script>
   <script src="js/xlsx.js"></script>
+  <script src="js/report.js"></script>
   <script src="js/accounting.js"></script>
   <script src="js/regops.js"></script>
   <script src="js/promos.js"></script>

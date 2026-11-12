@@ -176,10 +176,12 @@ Store.init().then(function () {
     renderCart();
   }
 
+  var searchQ = '';
   function renderGrid() {
     var list = products
-      .filter(function (p) { return currentCat === '__all' || p.category === currentCat; })
+      .filter(function (p) { return searchQ ? Calc.matchProduct(p, searchQ) : currentCat === '__all' || p.category === currentCat; })
       .sort(function (a, b) { return a.order - b.order; });
+    $('catTabs').classList.toggle('dim', !!searchQ);
     var counts = {};
     cart.lines.forEach(function (l) {
       counts[l.productId] = (counts[l.productId] || 0) + (l.unit === 'pc' ? l.qty : 1);
@@ -191,13 +193,30 @@ Store.init().then(function () {
         badge + '<span class="p-name">' + esc(p.name) + '</span>' +
         (promo ? '<span class="p-promo">' + esc(promo) + '</span>' : '') +
         '<span class="p-price">' + priceLabel(p) + (p.taxRate === 10 ? '（10%）' : '') + '</span></button>';
-    }).join('') : '<p class="note">商品がありません。「商品」タブから登録してください。</p>';
+    }).join('') : searchQ ? '<p class="note">「' + esc(searchQ) + '」に合う商品はありません。</p>'
+      : '<p class="note">商品がありません。「商品」タブから登録してください。</p>';
   }
+  $('prodSearch').addEventListener('input', function () { searchQ = this.value.trim(); renderGrid(); });
+  $('prodSearch').addEventListener('search', function () { searchQ = this.value.trim(); renderGrid(); });
+  $('prodSearch').addEventListener('keydown', function (e) {
+    // Enter：1件だけ見つかったらそのままレジに入れる（商品コードの読み取りにも使える）
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var hits = products.filter(function (p) { return Calc.matchProduct(p, searchQ); });
+    var exact = products.filter(function (p) { return p.code && p.code === searchQ; });
+    var one = exact.length === 1 ? exact[0] : hits.length === 1 ? hits[0] : null;
+    if (!one) return;
+    this.value = ''; searchQ = '';
+    this.blur();
+    renderGrid();
+    addProductToCart(one);
+  });
 
   $('catTabs').addEventListener('click', function (e) {
     var b = e.target.closest('[data-cat]');
     if (!b) return;
     currentCat = b.dataset.cat;
+    if (searchQ) { searchQ = ''; $('prodSearch').value = ''; }
     renderRegister();
   });
 
@@ -205,7 +224,9 @@ Store.init().then(function () {
     var b = e.target.closest('.product');
     if (!b) return;
     var p = products.find(function (x) { return x.id === b.dataset.id; });
-    if (!p) return;
+    if (p) addProductToCart(p);
+  });
+  function addProductToCart(p) {
     vibrate();
     if (p.unit === 'pc') {
       var same = cart.lines.find(function (l) { return l.productId === p.id && !l.discount && l.price === p.price; });
@@ -218,7 +239,7 @@ Store.init().then(function () {
     } else {
       openOpenPriceModal(p, null);
     }
-  });
+  }
 
   function newLine(p, qty, price) {
     return {
@@ -1360,24 +1381,67 @@ Store.init().then(function () {
   });
   function row(a, b) { return '<div class="row"><span>' + a + '</span><span>' + b + '</span></div>'; }
 
-  $('btnExportCsv').addEventListener('click', function () {
-    var sales = Store.getSales().filter(function (s) { return s.date === salesDate; });
-    var rows = [['日付', '時刻', '取引No', '支払', '取消', '商品', '税率', '単価', '数量', '単位', '値引', '金額', '取引合計']];
-    sales.forEach(function (s) {
-      s.lines.forEach(function (l) {
-        rows.push([s.date, timeStr(new Date(s.at)), noOf(s), payLabel(s), s.void ? '取消' : '',
-          l.name, l.taxRate, l.price, l.unit === 'open' ? 1 : l.qty, l.unit === 'g' ? 'g' : '個', l.discountAmount || 0, l.amount, s.totals.total]);
-      });
-      if (s.totals.discount) {
-        rows.push([s.date, timeStr(new Date(s.at)), noOf(s), payLabel(s), s.void ? '取消' : '',
-          '小計値引', '', '', '', '', s.totals.discount, -s.totals.discount, s.totals.total]);
+  // ---------- 期間の売上の書き出し（月報など） ----------
+  $('btnExportCsv').addEventListener('click', openExportModal);
+  function openExportModal() {
+    var range = { from: salesDate, to: salesDate };
+    var data = function () {
+      return { sales: Store.getSales(), reservations: Store.getReservations(), slips: Store.getSlips(), receipts: Store.getReceipts(), cashmoves: Store.getCashMoves() };
+    };
+    var presets = [['day', 'この日'], ['thisMonth', '今月'], ['lastMonth', '先月'], ['thisYear', '今年']];
+    openModal(
+      '<h3>期間で書き出す</h3><div class="sub">期間の売上を、Excel（日別・取引明細・商品別）や CSV に書き出します。税理士さんへの受け渡しや月報に使えます。</div>' +
+      '<div class="seg compact">' + presets.map(function (x) { return '<button class="btn small" data-pre="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="form" style="grid-template-columns:1fr 1fr;margin-top:8px"><label>開始日<input type="date" id="exFrom"></label><label>終了日<input type="date" id="exTo"></label></div>' +
+      '<div id="exPrev" class="note" style="margin:10px 0"></div>' +
+      '<div class="btn-row" style="flex-direction:column;align-items:stretch">' +
+      '<button class="btn primary" data-ex="xlsx">Excel（日別・取引明細・商品別）</button>' +
+      '<button class="btn" data-ex="detail">CSV（取引明細）</button>' +
+      '<button class="btn" data-ex="daily">CSV（日別の集計）</button></div>' +
+      '<div class="modal-foot"><button class="btn" data-act="cancel">閉じる</button><span></span></div>',
+      function (e) {
+        var b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.act === 'cancel') { closeModal(); return; }
+        if (b.dataset.pre) {
+          range = b.dataset.pre === 'day' ? { from: salesDate, to: salesDate } : Report.presetRange(b.dataset.pre, salesDate);
+          draw();
+          return;
+        }
+        if (b.dataset.ex) {
+          if (!valid()) return;
+          var sum = Report.summarize(data(), range.from, range.to);
+          var span = range.from === range.to ? range.from : range.from + '_' + range.to;
+          var title = settings.storeName + ' ' + (range.from === range.to ? range.from : range.from + '〜' + range.to);
+          if (b.dataset.ex === 'xlsx') {
+            saveFile('nikupos-sales-' + span + '.xlsx', XLSX.writeXlsxBook(Report.bookSheets(sum, title)),
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          } else if (b.dataset.ex === 'detail') {
+            saveFile('nikupos-sales-' + span + '.csv', Report.toCsv(Report.detailRows(sum)), 'text/csv');
+          } else {
+            saveFile('nikupos-daily-' + span + '.csv', Report.toCsv(Report.dailyRows(sum)), 'text/csv');
+          }
+          POS.log('export', '売上を書き出し ' + range.from + '〜' + range.to);
+        }
       }
-    });
-    var csv = '﻿' + rows.map(function (r) {
-      return r.map(function (c) { var v = String(c); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',');
-    }).join('\r\n');
-    saveFile('nikupos-sales-' + salesDate + '.csv', csv, 'text/csv');
-  });
+    );
+    function valid() { return range.from && range.to && range.from <= range.to && Report.datesBetween(range.from, range.to).length <= 366; }
+    function draw() {
+      $('exFrom').value = range.from;
+      $('exTo').value = range.to;
+      var ok = valid();
+      modalBody.querySelectorAll('[data-ex]').forEach(function (x) { x.disabled = !ok; });
+      if (!ok) { $('exPrev').textContent = range.from > range.to ? '開始日は終了日より前にしてください' : '期間は1年（366日）以内にしてください'; return; }
+      var sum = Report.summarize(data(), range.from, range.to);
+      var t = sum.total;
+      $('exPrev').innerHTML = esc(range.from) + ' 〜 ' + esc(range.to) + '（' + sum.dates.length + '日間）<br>' +
+        '売上 <b>' + yen(t.total) + '</b>・客数 ' + num(t.count) + '件・現金 ' + yen(t.cash) + '・キャッシュレス ' + yen(t.cashless) +
+        (t.returnsCount ? '・返品 ' + t.returnsCount + '件' : '') + '・取引明細 ' + num(sum.sales.length) + '件';
+    }
+    $('exFrom').addEventListener('change', function () { range.from = this.value; draw(); });
+    $('exTo').addEventListener('change', function () { range.to = this.value; draw(); });
+    draw();
+  }
 
   /** ファイル保存。スマホでは共有シート（「ファイルに保存」等）を優先 */
   function saveFile(name, content, type) {
@@ -1459,6 +1523,9 @@ Store.init().then(function () {
       '<h3>' + (isNew ? '商品を追加' : '商品を編集') + '</h3>' +
       '<form class="form" id="pForm" onsubmit="return false">' +
       '<label>商品名<input name="name" value="' + esc(d.name) + '" required autocomplete="off"></label>' +
+      '<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">' +
+      '<label>よみ（検索用・なくても可）<input name="kana" value="' + esc(d.kana || '') + '" autocomplete="off" placeholder="例：とりもも"></label>' +
+      '<label>商品コード<input name="code" value="' + esc(d.code || '') + '" autocomplete="off" inputmode="numeric" placeholder="任意"></label></div>' +
       '<label>カテゴリ<select name="category">' + cats.map(function (c) {
         return '<option' + (c === d.category ? ' selected' : '') + '>' + esc(c) + '</option>';
       }).join('') + '</select></label>' +
@@ -1504,6 +1571,8 @@ Store.init().then(function () {
           if (!name) { alert('商品名を入力してください'); return; }
           if (d.unit !== 'open' && !(price > 0)) { alert('単価を入力してください'); return; }
           d.name = name;
+          d.kana = f.elements.kana.value.trim();
+          d.code = f.elements.code.value.trim();
           d.category = f.elements.category.value;
           d.price = d.unit === 'open' ? 0 : price;
           d.wsPrice = d.unit === 'open' ? 0 : Math.floor(Number(f.elements.wsPrice.value || 0));

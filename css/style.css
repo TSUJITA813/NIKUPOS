@@ -536,3 +536,15 @@ button.display.tap:not(.target) .value { opacity: .85; }
 .mini-hold { color: #ffd27a; font-weight: 700; }
 #btnDrawer[hidden], .btn[hidden] { display: none; }
 .cart-actions .btn:not(.big) { padding-left: 4px; padding-right: 4px; white-space: nowrap; font-size: 15px; }
+
+/* 商品の検索 */
+.cat-bar { display: flex; align-items: center; gap: 4px; padding-left: 12px; flex: none; }
+.cat-bar .cat-tabs { flex: 1; min-width: 0; padding-left: 4px; }
+#prodSearch { width: 170px; flex: none; min-height: 44px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink); font-size: 16px; }
+#prodSearch:focus { outline: 2px solid var(--accent); width: 220px; }
+.cat-tabs.dim { opacity: .45; }
+@media (max-width: 520px) {
+  .cat-bar { flex-wrap: wrap; padding: 8px 12px 0; }
+  #prodSearch, #prodSearch:focus { width: 100%; }
+  .cat-bar .cat-tabs { flex-basis: 100%; padding: 8px 0 10px; }
+}
