@@ -116,9 +116,9 @@
 
   // ---------- IndexedDB ----------
   var DB_NAME = 'nikupos';
-  var DB_VERSION = 2; // 2: 入出金・レジ締め・操作ログ・発注書を追加
+  var DB_VERSION = 3; // 2: 入出金・レジ締め・操作ログ・発注書、3: 価格改定の予約
   var COLLECTIONS = ['sales', 'reservations', 'customers', 'wholesale', 'invoices', 'receipts', 'moves',
-    'cashmoves', 'closings', 'logs', 'orders'];
+    'cashmoves', 'closings', 'logs', 'orders', 'pricechanges'];
   var db = null;
 
   function openDB() {
@@ -427,6 +427,8 @@
     addClosing: function (x) { return C.closings.add(x); },
     getLogs: function () { return C.logs.all(); },
     addLog: function (x) { return C.logs.add(x); },
+    getPriceChanges: function () { return C.pricechanges.all(); },
+    savePriceChanges: function (list) { return C.pricechanges.saveAll(list); },
     getOrders: function () { return C.orders.all(); },
     saveOrders: function (list) { return C.orders.saveAll(list); },
     addMoves: function (list) { list.forEach(function (m) { C.moves.add(m); }); },

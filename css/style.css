@@ -501,3 +501,15 @@ tr.void td.act { text-decoration: none; }
   .card .v { font-size: 20px; }
   .denoms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---------- 価格の一括変更 ---------- */
+.page.price-editing { max-width: 1200px; }
+.page.price-editing > :not(#priceBox) { display: none; }
+.bulk-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 10px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.bulk-tools select, .bulk-tools input { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; background: var(--panel); }
+.price-table td { white-space: normal; vertical-align: top; }
+.price-table input { width: 110px; min-height: 40px; text-align: right; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; font-size: 16px; }
+.price-table tr.changed td { background: #fff7e6; }
+.price-table tr.changed input { border-color: #d9a441; font-weight: 700; }
+@media (max-width: 759px) { .price-table input { width: 84px; } }
+.modal:has(#imDateL), .modal:has(.changes-wide) { max-width: 760px; }

@@ -73,6 +73,7 @@ Store.init().then(function () {
   });
 
   function showView(name) {
+    try { localStorage.setItem('nikupos.lastView', name); } catch (e) { /* noop */ }
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === name); });
     document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
     if (name === 'register') renderRegister();
@@ -1514,9 +1515,11 @@ Store.init().then(function () {
       !confirm('レジに会計途中の商品があります。予約の内容に置き換えますか？')) return;
     cart = {
       lines: r.items.map(function (it) {
+        // 価格は受け取り時（会計時）の商品マスタの価格（毎月の価格改定に合わせる）
+        var pr = products.find(function (p) { return p.id === it.productId; });
         var l = {
           key: 'L' + (lineSeq++), productId: it.productId, name: it.name, unit: it.unit,
-          price: it.price, qty: it.qty, taxRate: it.taxRate, discount: null
+          price: pr && it.unit !== 'open' ? pr.price : it.price, qty: it.qty, taxRate: pr ? pr.taxRate : it.taxRate, discount: null
         };
         if (it.unit === 'g') l.estimated = true; // 実際の重さで量り直す
         return l;
@@ -2110,6 +2113,9 @@ Store.init().then(function () {
   setInterval(tick, 10000);
   currentCat = '__all';
   renderRegister();
+  var lastView = null;
+  try { lastView = localStorage.getItem('nikupos.lastView'); } catch (e) { /* noop */ }
+  if (lastView && lastView !== 'register' && $('view-' + lastView)) showView(lastView);
   refreshBadges();
   Sync.start();
   updateSyncDot();
