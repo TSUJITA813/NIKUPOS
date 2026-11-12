@@ -65,10 +65,11 @@
     scaleMode: 'none', // 'none' | 'keyboard' | 'bluetooth'
     scaleUnit: 'g',    // はかりが単位を送らない場合の単位
     bankInfo: '',      // 請求書に載せる振込先
+    feeMax: 1000,      // 振込手数料として処理できる差額の上限（円）
     deviceCode: ''     // この端末の記号（複数端末で使うとき、番号の頭に付ける）
   };
   // 全端末で共通にする設定（それ以外はこの端末だけの設定）
-  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo'];
+  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax'];
 
   // ---------- localStorage ----------
   function read(key, fallback) {

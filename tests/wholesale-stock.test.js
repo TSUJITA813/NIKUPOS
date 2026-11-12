@@ -121,8 +121,10 @@ test('日別集計：卸の現金回収はレジ内現金に含める', () => {
       { date: 'D', status: 'delivered', payment: 'credit', totals: { total: 10800 } },
       { date: 'D', status: 'order', payment: 'cash', totals: { total: 999 } }
     ],
-    receipts: [{ date: 'D', method: 'cash', amount: 3000 }, { date: 'D', method: 'transfer', amount: 50000 }]
+    receipts: [{ date: 'D', method: 'cash', amount: 3000 }, { date: 'D', method: 'transfer', amount: 50000 }, { date: 'D', method: 'fee', amount: 440 }]
   });
+  assert.equal(s.wholesale.receiptOther, 50000, '振込手数料は入金に含めない');
+  assert.equal(s.wholesale.fee, 440);
   assert.equal(s.wholesale.total, 16200);
   assert.equal(s.wholesale.count, 2);
   assert.equal(s.drawerCash, 5400 + 3000);

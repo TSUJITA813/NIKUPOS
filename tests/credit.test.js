@@ -60,3 +60,15 @@ test('売掛金のまとめ：未請求・請求済未入金・期限切れ・�
   assert.equal(s.overdue, 15000);
   assert.equal(s.nextDue, '2027-01-31');
 });
+
+test('振込手数料の差額処理で請求書が入金済になり、売掛残も0になる', () => {
+  const invoices = [{ id: 'i1', customerId: 'c1', no: 1, createdAt: '2026-11-01', purchase: 21060, dueDate: '2026-11-30' }];
+  const slips = [{ customerId: 'c1', status: 'delivered', payment: 'credit', date: '2026-10-20', totals: { total: 21060 }, invoiceId: 'i1' }];
+  const receipts = [
+    { customerId: 'c1', date: '2026-11-25', amount: 20620, method: 'transfer' },
+    { customerId: 'c1', date: '2026-11-25', amount: 440, method: 'fee' }
+  ];
+  const s = Calc.receivableSummary('c1', slips, receipts, invoices, '2026-12-01');
+  assert.equal(s.invoices.i1.status, 'paid');
+  assert.equal(s.balance, 0);
+});

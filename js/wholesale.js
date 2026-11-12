@@ -16,7 +16,7 @@
   var scope = 'day'; // 'day' | 'open'(未納品すべて)
   var STATUS = { order: '受注', delivered: '納品済', cancelled: '取消' };
   var PAY = { credit: '掛け', cash: '現金' };
-  var METHOD = { cash: '現金', transfer: '振込', other: 'その他' };
+  var METHOD = { cash: '現金', transfer: '振込', other: 'その他', fee: '振込手数料（当方負担）' };
 
   function noOf(x) { return x.noLabel || x.no; }
   function today() { return POS.localDate(new Date()); }
@@ -42,6 +42,9 @@
     if (c.payment !== 'credit') return '現金（納品時）' + mode;
     return '掛け・' + termsText(c) + mode;
   }
+  /** 振込手数料として処理できる差額の上限 */
+  function feeMax() { var v = settings().feeMax; return v == null || v === '' ? 1000 : Number(v) || 0; }
+  function monthMemo(i) { return i.periodTo.slice(0, 7).replace('-', '年') + '月締め分'; }
   function honor(c) { return (c && c.honorific) || '御中'; }
   function statusPill(st) {
     if (!st) return '';
@@ -237,7 +240,9 @@
         '<div class="li-sub">今回お買上 ' + yen(i.purchase) + '（うち消費税 ' + yen(i.tax) + '）・繰越 ' + yen(i.carry) +
         (i.dueDate ? '・支払期限 ' + POS.weekday(i.dueDate) : '') + '・発行 ' + i.issueDate + '</div>' +
         '<div class="btn-row"><button class="btn" data-b="print" data-id="' + i.id + '">印刷</button>' +
-        (st && st.remaining > 0 ? '<button class="btn primary" data-b="paid" data-id="' + i.id + '">入金済にする（' + yen(st.remaining) + '）</button>' : '') +
+        (st && st.status === 'partial' && st.remaining <= feeMax()
+          ? '<button class="btn primary" data-b="fee" data-id="' + i.id + '">差額 ' + yen(st.remaining) + ' を振込手数料で処理</button>' : '') +
+        (st && st.remaining > 0 ? '<button class="btn' + (st.status === 'partial' && st.remaining <= feeMax() ? '' : ' primary') + '" data-b="paid" data-id="' + i.id + '">入金済にする（' + yen(st.remaining) + '）</button>' : '') +
         (latest[i.customerId] === i ? '<button class="btn danger-outline" data-b="undo" data-id="' + i.id + '">作り直す（取消）</button>' : '') +
         '</div></div>';
     }).join('') : '<p class="note">まだ請求書はありません。</p>';
@@ -289,6 +294,7 @@
     else if (d.c === 'ledger') openLedger(customerById(d.id));
     else if (d.b === 'oneinv') oneTapInvoice(customerById(d.cid));
     else if (d.b === 'paid') markPaid(Store.getInvoices().find(function (i) { return i.id === d.id; }));
+    else if (d.b === 'fee') feeOff(Store.getInvoices().find(function (i) { return i.id === d.id; }));
     else if (d.b === 'receipt') openReceiptModal(d.cid);
     else if (d.b === 'invoice') openInvoiceModal(d.cid);
     else if (d.b === 'bulk') bulkInvoices();
@@ -626,6 +632,7 @@
     if (!customers.length) { alert('掛け売りの得意先がありません。'); return; }
     var cid = presetId || customers[0].id;
     var method = 'transfer';
+    var target = 0; // 選んだ請求書の残額（差額を振込手数料にするかの判定に使う）
     POS.openModal(
       '<h3>入金を登録</h3>' +
       '<form class="form" id="rcForm" onsubmit="return false" style="margin-top:8px">' +
@@ -634,7 +641,8 @@
       }).join('') + '</select></label>' +
       '<p class="note" id="rcBal"></p><div class="btn-row" id="rcInv"></div>' +
       '<label>入金日<input type="date" name="date" value="' + today() + '"></label>' +
-      '<label>金額<input type="number" inputmode="numeric" name="amount" min="1"></label>' +
+      '<label>金額（実際に入金された額）<input type="number" inputmode="numeric" name="amount" min="1"></label>' +
+      '<label class="check" id="rcFeeBox" style="display:none"><input type="checkbox" id="rcFee" checked> <span id="rcFeeText"></span></label>' +
       '<label>方法<div class="seg"><button type="button" class="btn small" data-m="transfer">振込</button>' +
       '<button type="button" class="btn small" data-m="cash">現金</button><button type="button" class="btn small" data-m="other">その他</button></div></label>' +
       '<label>メモ<input name="note" autocomplete="off" placeholder="例：11月分"></label></form>' +
@@ -644,24 +652,45 @@
         if (!b) return;
         if (b.dataset.m) { method = b.dataset.m; draw(); }
         else if (b.dataset.fill) {
+          target = Number(b.dataset.fill);
           f.amount.value = b.dataset.fill;
           if (!f.note.value) f.note.value = b.dataset.memo;
+          drawFee();
+          f.amount.focus();
+          f.amount.select();
         } else if (b.dataset.act === 'cancel') POS.closeModal();
         else if (b.dataset.act === 'save') {
           var amount = Math.floor(Number(f.amount.value) || 0);
           if (!(amount > 0)) { alert('金額を入力してください'); return; }
           var list = Store.getReceipts();
-          list.push({ id: Store.newId('P'), customerId: f.customer.value, date: f.date.value || today(), amount: amount, method: method, note: f.note.value.trim() });
+          var date = f.date.value || today();
+          list.push({ id: Store.newId('P'), customerId: f.customer.value, date: date, amount: amount, method: method, note: f.note.value.trim() });
+          var fee = $('rcFee').checked ? feeDiff() : 0;
+          if (fee) {
+            list.push({ id: Store.newId('P'), customerId: f.customer.value, date: date, amount: fee, method: 'fee', note: f.note.value.trim() });
+          }
           Store.saveReceipts(list);
           POS.closeModal();
           render();
-          POS.toast('入金を登録しました' + (method === 'cash' ? '（レジ内現金に含めます）' : ''));
+          POS.toast('入金を登録しました' + (fee ? '（差額 ' + yen(fee) + ' は振込手数料として処理）' : '') + (method === 'cash' ? '（レジ内現金に含めます）' : ''));
         }
       },
       false
     );
     var f = $('rcForm').elements;
-    f.customer.addEventListener('change', draw);
+    f.customer.addEventListener('change', function () { target = 0; draw(); drawFee(); });
+    POS.modalBody.oninput = function (e) { if (e.target.name === 'amount') drawFee(); };
+    /** 請求額より少ない入金で、差額が上限以下なら振込手数料とみなす */
+    function feeDiff() {
+      var amount = Math.floor(Number(f.amount.value) || 0);
+      var diff = target - amount;
+      return target && amount > 0 && diff > 0 && diff <= feeMax() ? diff : 0;
+    }
+    function drawFee() {
+      var d = feeDiff();
+      $('rcFeeBox').style.display = d ? '' : 'none';
+      $('rcFeeText').textContent = '差額 ' + yen(d) + ' を振込手数料（当方負担）として処理する';
+    }
     function draw() {
       POS.modalBody.querySelectorAll('[data-m]').forEach(function (x) { x.classList.toggle('on', x.dataset.m === method); });
       var c = customerById(f.customer.value);
@@ -770,10 +799,22 @@
     if (!st || st.remaining <= 0) return;
     if (!confirm(i.customerName + ' の ' + i.periodTo + '締め分 ' + yen(st.remaining) + ' を、今日の振込入金として登録しますか？')) return;
     var list = Store.getReceipts();
-    list.push({ id: Store.newId('P'), customerId: i.customerId, date: today(), amount: st.remaining, method: 'transfer', note: i.periodTo.slice(0, 7).replace('-', '年') + '月締め分' });
+    list.push({ id: Store.newId('P'), customerId: i.customerId, date: today(), amount: st.remaining, method: 'transfer', note: monthMemo(i) });
     Store.saveReceipts(list);
     render();
     POS.toast('入金を登録しました');
+  }
+
+  /** ワンタップ：一部入金の残り（振込手数料が差し引かれた分）を、当方負担の振込手数料として処理 */
+  function feeOff(i) {
+    var st = Calc.invoiceStatus(i.customerId, Store.getInvoices(), Store.getReceipts(), today())[i.id];
+    if (!st || st.remaining <= 0) return;
+    if (!confirm(i.customerName + ' の ' + i.periodTo + '締め分の残り ' + yen(st.remaining) + ' を、振込手数料（当方負担）として処理しますか？\n売掛金から差し引きます（現金・振込の入金には数えません）。')) return;
+    var list = Store.getReceipts();
+    list.push({ id: Store.newId('P'), customerId: i.customerId, date: today(), amount: st.remaining, method: 'fee', note: monthMemo(i) });
+    Store.saveReceipts(list);
+    render();
+    POS.toast('振込手数料として処理しました');
   }
 
   function bulkInvoices() {
@@ -816,6 +857,7 @@
     rows.forEach(function (r) { if (r.date < from) opening = r.balance; });
     return { opening: opening, rows: rows.filter(function (r) { return r.date >= from && r.date <= to; }) };
   }
+  function kindLabel(r) { return r.kind === 'receipt' && r.item.method === 'fee' ? '手数料' : KIND[r.kind]; }
   function ledgerDesc(r) {
     var x = r.item;
     if (r.kind === 'delivery') return x.lines.map(function (l) { return l.name + ' ' + qtyText(l); }).join('、');
@@ -856,7 +898,7 @@
         '<div class="table-wrap"><table><thead><tr><th>日付</th><th>区分</th><th>No</th><th>内容</th><th class="r">売上</th><th class="r">入金</th><th class="r">残高</th></tr></thead><tbody>' +
         '<tr><td colspan="6">前期繰越</td><td class="r num">' + yen(L.opening) + '</td></tr>' +
         L.rows.map(function (r) {
-          return '<tr><td>' + r.date.slice(5).replace('-', '/') + '</td><td>' + KIND[r.kind] + '</td><td>' + esc(ledgerRef(r)) + '</td>' +
+          return '<tr><td>' + r.date.slice(5).replace('-', '/') + '</td><td>' + kindLabel(r) + '</td><td>' + esc(ledgerRef(r)) + '</td>' +
             '<td style="white-space:normal;min-width:160px">' + esc(ledgerDesc(r)) + '</td>' +
             '<td class="r num">' + (r.debit ? yen(r.debit) : '') + '</td><td class="r num">' + (r.credit ? yen(r.credit) : '') + '</td>' +
             '<td class="r num">' + (r.kind === 'invoice' ? '' : yen(r.balance)) + '</td></tr>';
@@ -882,7 +924,7 @@
       '<tbody><tr><td>' + yen(L.opening) + '</td><td>' + yen(sales) + '</td><td>' + yen(paid) + '</td><td><b>' + yen(end) + '</b></td></tr></tbody></table>' +
       '<table><thead><tr><th>日付</th><th>区分</th><th>No</th><th>内容</th><th>お買上</th><th>御入金</th><th>残高</th></tr></thead><tbody>' +
       L.rows.filter(function (r) { return r.kind !== 'invoice'; }).map(function (r) {
-        return '<tr><td>' + r.date.slice(5).replace('-', '/') + '</td><td>' + KIND[r.kind] + '</td><td>' + esc(ledgerRef(r)) + '</td><td>' + esc(ledgerDesc(r)) + '</td>' +
+        return '<tr><td>' + r.date.slice(5).replace('-', '/') + '</td><td>' + kindLabel(r) + '</td><td>' + esc(ledgerRef(r)) + '</td><td>' + esc(ledgerDesc(r)) + '</td>' +
           '<td class="r">' + (r.debit ? yen(r.debit) : '') + '</td><td class="r">' + (r.credit ? yen(r.credit) : '') + '</td><td class="r">' + yen(r.balance) + '</td></tr>';
       }).join('') + '</tbody></table>' +
       '<div class="notes">金額は税込です。' + (settings().bankInfo ? '<br>お振込先：' + esc(settings().bankInfo).replace(/\n/g, '<br>') : '') + '</div>';
@@ -893,7 +935,7 @@
     var L = ledgerRows(c, from, to);
     var rows = [['日付', '区分', 'No', '内容', '売上(税込)', '入金', '残高'], [from, '前期繰越', '', '', '', '', L.opening]];
     L.rows.forEach(function (r) {
-      rows.push([r.date, KIND[r.kind], ledgerRef(r), ledgerDesc(r), r.debit || '', r.credit || '', r.kind === 'invoice' ? '' : r.balance]);
+      rows.push([r.date, kindLabel(r), ledgerRef(r), ledgerDesc(r), r.debit || '', r.credit || '', r.kind === 'invoice' ? '' : r.balance]);
     });
     var csv = '\ufeff' + rows.map(function (r) {
       return r.map(function (v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',');

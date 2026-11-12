@@ -148,7 +148,7 @@
       sales: daySales, count: 0, total: 0, cash: 0, cashless: 0, depositUsed: 0, discount: 0, voids: 0,
       rates: {}, items: {},
       depositIn: { cash: 0, cashless: 0 }, depositRefund: { cash: 0, cashless: 0 }, drawerCash: 0,
-      wholesale: { count: 0, total: 0, credit: 0, cashOnDelivery: 0, receiptCash: 0, receiptOther: 0 }
+      wholesale: { count: 0, total: 0, credit: 0, cashOnDelivery: 0, receiptCash: 0, receiptOther: 0, fee: 0 }
     };
     daySales.forEach(function (s) {
       if (s.void) { sum.voids++; return; }
@@ -187,7 +187,9 @@
       });
       (ws.receipts || []).forEach(function (r) {
         if (r.date !== date) return;
-        if (r.method === 'cash') w.receiptCash += r.amount; else w.receiptOther += r.amount;
+        if (r.method === 'fee') w.fee += r.amount; // 振込手数料（当方負担）はお金の入金ではない
+        else if (r.method === 'cash') w.receiptCash += r.amount;
+        else w.receiptOther += r.amount;
       });
     }
     sum.drawerCash = sum.cash + sum.depositIn.cash - sum.depositRefund.cash + w.cashOnDelivery + w.receiptCash;

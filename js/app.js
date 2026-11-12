@@ -817,6 +817,7 @@ Store.init().then(function () {
     if (w.count) h += card('卸の納品（税込）', yen(w.total) + '<div class="note">' + w.count + '件・うち掛け ' + yen(w.credit) + '</div>');
     if (w.cashOnDelivery || w.receiptCash) h += card('卸の現金回収', yen(w.cashOnDelivery + w.receiptCash));
     if (w.receiptOther) h += card('卸の振込などの入金', yen(w.receiptOther));
+    if (w.fee) h += card('振込手数料（当方負担）', yen(w.fee) + '<div class="note">売掛金から差し引き。経費（支払手数料）</div>');
     h += card('レジ内現金の増減', yen(s.drawerCash) + '<div class="note">現金売上＋前受金−返金＋卸の現金回収</div>');
     Object.keys(s.rates).sort(function (a, b) { return a - b; }).forEach(function (r) {
       h += card(r + '%対象（内税）', yen(s.rates[r].amount) + '<div class="note">税 ' + yen(s.rates[r].tax) + '</div>');
@@ -911,7 +912,8 @@ Store.init().then(function () {
       row('前受金の返金（現金）', yen(s.depositRefund.cash));
     h += '<hr>' + row('卸の納品（税込）', yen(s.wholesale.total) + '（' + s.wholesale.count + '件）') +
       row('卸の現金回収', yen(s.wholesale.cashOnDelivery + s.wholesale.receiptCash)) +
-      row('卸の振込などの入金', yen(s.wholesale.receiptOther));
+      row('卸の振込などの入金', yen(s.wholesale.receiptOther)) +
+      row('振込手数料（当方負担）', yen(s.wholesale.fee));
     h += '<hr>' + row('<b>レジ内現金の増減</b>', '<b>' + yen(s.drawerCash) + '</b>');
     h += '<hr>';
     Object.keys(s.rates).sort(function (a, b) { return a - b; }).forEach(function (r) {
@@ -1477,7 +1479,7 @@ Store.init().then(function () {
   // ================= 設定 =================
   function renderSettings() {
     var f = $('settingsForm');
-    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo'].forEach(function (k) { f.elements[k].value = settings[k]; });
+    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax'].forEach(function (k) { f.elements[k].value = settings[k]; });
     f.elements.categories.value = settings.categories.join(',');
     f.autoPrint.checked = !!settings.autoPrint;
     var counts = '店頭の売上 ' + num(Store.getSales().length) + '件・予約 ' + num(Store.getReservations().length) +
@@ -1533,7 +1535,8 @@ Store.init().then(function () {
   $('settingsForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var f = this;
-    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo'].forEach(function (k) { settings[k] = f.elements[k].value.trim(); });
+    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax'].forEach(function (k) { settings[k] = f.elements[k].value.trim(); });
+    settings.feeMax = Math.max(0, Math.floor(Number(settings.feeMax) || 0));
     settings.categories = f.elements.categories.value.split(/[,、，]/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!settings.categories.length) settings.categories = ['その他'];
     settings.autoPrint = f.autoPrint.checked;
