@@ -899,6 +899,7 @@ Store.init().then(function () {
         return {
           productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: l.qty,
           taxRate: l.taxRate, discount: l.discount, promoName: l.promoName || '', promoDiscount: l.promoDiscount || 0,
+          cost: costNow(l.productId, l.unit), // 会計時の原価（税抜・1kg／1個あたり）。あとで原価を変えても過去の粗利は変わらない
           discountAmount: Calc.lineDiscount(l, round()),
           amount: Calc.lineAmount(l, round())
         };
@@ -962,6 +963,12 @@ Store.init().then(function () {
   }
 
   // ================= 印刷 =================
+  /** 商品の今の原価（税抜・1kg／1個あたり）。なければ null */
+  function costNow(productId, unit) {
+    if (unit !== 'g' && unit !== 'pc') return null;
+    var p = products.find(function (x) { return x.id === productId; });
+    return p && p.cost ? p.cost : null;
+  }
   /** レシートプリンターに直接送るか（設定 → レシートプリンター） */
   function usePrinter() { return settings.printerMode === 'epson' && !!Printer.normalizeHost(settings.printerHost); }
   function printerCfg(src) {
@@ -1132,7 +1139,7 @@ Store.init().then(function () {
     $('salesSummary').innerHTML = h;
   }
   // 売上タブの中の切り替え（日別・レジ締め・入出金・分析・操作ログ）
-  var salesTab = 'day';
+  var salesTab = 'dash';
   $('salesTabs').addEventListener('click', function (e) {
     var b = e.target.closest('[data-stab]');
     if (!b) return;
@@ -1273,7 +1280,9 @@ Store.init().then(function () {
         id: Store.newId('S'), kind: 'return', origId: sale.id, origNo: noOf(sale), at: now.toISOString(), date: localDate(now),
         dev: myDev(), staff: staffName(), reason: $('retReason').value.trim(),
         lines: r.lines.map(function (l) {
-          return { productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: -l.qty, taxRate: l.taxRate, discountAmount: 0, amount: -l.amount, itemAmount: -l.base };
+          var o = sale.lines[l.idx] || {};
+          return { productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: -l.qty, taxRate: l.taxRate, discountAmount: 0, amount: -l.amount, itemAmount: -l.base,
+            cost: o.cost != null ? o.cost : costNow(l.productId, l.unit) };
         }),
         discount: null,
         totals: { subtotal: -T, discount: 0, lineDiscount: 0, total: -T, byRate: r.byRate.map(function (x) { return { rate: x.rate, amount: -x.amount, tax: -x.tax }; }) },
@@ -1560,6 +1569,7 @@ Store.init().then(function () {
       (d.minStock ? (d.unit === 'g' ? d.minStock / 1000 : d.minStock) : '') + '" placeholder="例：' + (d.unit === 'g' ? '2' : '10') + '"></label>' +
       '<label id="pParLabel"><span id="pParText"></span><input name="parStock" type="text" inputmode="decimal" value="' +
       (d.parStock ? (d.unit === 'g' ? d.parStock / 1000 : d.parStock) : '') + '" placeholder="空欄なら発注点の2倍"></label>' +
+      '<label id="pCostLabel"><span id="pCostText"></span><input name="cost" type="number" inputmode="numeric" min="0" step="1" value="' + esc(d.cost || '') + '" placeholder="空欄なら粗利を計算しません"></label>' +
       '<label id="pSupLabel">仕入先（発注書で使います）<input name="supplier" value="' + esc(d.supplier || '') + '" autocomplete="off"></label>' +
       '<label>税率<div class="seg" id="pTax">' +
       '<button type="button" class="btn small" data-tax="8">8%（食品・持ち帰り）</button>' +
@@ -1602,6 +1612,7 @@ Store.init().then(function () {
           var parv = parseFloat(f.elements.parStock.value || '0') || 0;
           d.parStock = d.unit === 'g' ? Math.round(parv * 1000) : Math.round(parv);
           d.supplier = f.elements.supplier.value.trim();
+          d.cost = d.unit === 'open' ? 0 : Math.max(0, Math.floor(Number(f.elements.cost.value || 0)));
           if (isNew) {
             d.id = Store.newId('p');
             d.order = products.reduce(function (m, x) { return Math.max(m, x.order); }, 0) + 1;
@@ -1629,6 +1640,8 @@ Store.init().then(function () {
       $('pMinLabel').style.display = open ? 'none' : '';
       $('pParLabel').style.display = open ? 'none' : '';
       $('pSupLabel').style.display = open ? 'none' : '';
+      $('pCostLabel').style.display = open ? 'none' : '';
+      $('pCostText').textContent = '原価（' + (d.unit === 'g' ? '1kg' : '1個') + 'あたり・税抜・円）入荷で仕入単価を入れると自動で更新';
       $('pParText').textContent = '適正在庫：発注するときの目安の量（' + (d.unit === 'g' ? 'kg' : '個') + '）';
       $('pWsText').textContent = d.unit === 'g' ? '卸単価（1kgあたり・税抜・円）' : '卸単価（1個あたり・税抜・円）';
       $('pMinText').textContent = '発注点：在庫がこれを下回ったら知らせる（' + (d.unit === 'g' ? 'kg' : '個') + '）';
@@ -2313,6 +2326,7 @@ Store.init().then(function () {
     saveSettings: function () { Store.saveSettings(settings); },
     // 担当者の権限（staff.js で置き換える。担当者を使わないときは常に許可）
     requirePerm: function (action, label) { return Promise.resolve(true); },
+    needsApproval: function () { return false; },
     log: function () {},
     currentStaff: function () { return null; },
     addBadge: function (f) { badgeFns.push(f); },
@@ -2462,7 +2476,18 @@ Store.init().then(function () {
   renderRegister();
   var lastView = null;
   try { lastView = localStorage.getItem('nikupos.lastView'); } catch (e) { /* noop */ }
-  if (lastView && lastView !== 'register' && $('view-' + lastView)) showView(lastView);
+  // パソコンの管理画面用：…/#dashboard で売上のダッシュボードを開く（#sales・#day なども可）
+  var HASH_VIEWS = { dashboard: ['sales', 'dash'], sales: ['sales', 'dash'], day: ['sales', 'day'], analysis: ['sales', 'analysis'], products: ['products'], inventory: ['inventory'], wholesale: ['wholesale'], settings: ['settings'] };
+  function openHash() {
+    var hv = HASH_VIEWS[(location.hash || '').replace('#', '')];
+    if (!hv) return false;
+    if (hv[1]) salesTab = hv[1];
+    showView(hv[0]);
+    return true;
+  }
+  window.addEventListener('hashchange', openHash);
+  if (openHash()) { /* 指定の画面を開いた */ }
+  else if (lastView && lastView !== 'register' && $('view-' + lastView)) showView(lastView);
   refreshBadges();
   Sync.start();
   updateSyncDot();

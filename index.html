@@ -104,13 +104,14 @@
     <main id="view-sales" class="view">
       <div class="page">
         <div class="subtabs" id="salesTabs">
-          <button class="btn on" data-stab="day">日別の売上</button>
+          <button class="btn on" data-stab="dash">ダッシュボード</button>
+          <button class="btn" data-stab="day">日別の売上</button>
           <button class="btn" data-stab="close">レジ締め</button>
           <button class="btn" data-stab="cash">入出金</button>
           <button class="btn" data-stab="analysis">分析</button>
           <button class="btn" data-stab="log">操作ログ</button>
         </div>
-        <div id="salesDay">
+        <div id="salesDay" hidden>
         <div class="toolbar">
           <button class="btn small" id="btnPrevDay">◀</button>
           <input type="date" id="salesDate">
@@ -122,7 +123,7 @@
         </div>
         <div id="salesSummary"></div>
         </div>
-        <div id="salesPane" hidden></div>
+        <div id="salesPane"></div>
       </div>
     </main>
 
@@ -257,11 +258,13 @@
   <script src="js/pricing.js"></script>
   <script src="js/xlsx.js"></script>
   <script src="js/report.js"></script>
+  <script src="js/profit.js"></script>
   <script src="js/accounting.js"></script>
   <script src="js/regops.js"></script>
   <script src="js/promos.js"></script>
   <script src="js/staff.js"></script>
   <script src="js/analysis.js"></script>
+  <script src="js/dashboard.js"></script>
   <script src="js/pricelist.js"></script>
   <script src="js/inventory.js"></script>
   <script src="js/wholesale.js"></script>

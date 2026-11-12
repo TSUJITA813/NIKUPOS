@@ -44,7 +44,10 @@
     { key: 'trackStock', label: '在庫管理', width: 9 },
     { key: 'minStock', label: '発注点（kg・個）', width: 13, num: true },
     { key: 'parStock', label: '適正在庫（kg・個）', width: 14, num: true },
-    { key: 'supplier', label: '仕入先', width: 16 }
+    { key: 'supplier', label: '仕入先', width: 16 },
+    { key: 'cost', label: '原価（税抜・1kg／1個あたり）', width: 16, num: true },
+    { key: 'kana', label: 'よみ', width: 14 },
+    { key: 'code', label: '商品コード', width: 12 }
   ];
 
   function byCatOrder(categories) {
@@ -69,7 +72,10 @@
         p.trackStock ? '○' : '',
         p.minStock ? p.minStock / kg : '',
         p.parStock ? p.parStock / kg : '',
-        p.supplier || ''
+        p.supplier || '',
+        p.unit === 'open' || !p.cost ? '' : p.cost,
+        p.kana || '',
+        p.code || ''
       ]);
     });
     return rows;
@@ -139,7 +145,7 @@
       }
       var unit = vals.unit || (p && p.unit) || 'pc';
       var kg = unit === 'g' ? 1000 : 1;
-      [['price', 1], ['wsPrice', 1], ['minStock', kg], ['parStock', kg]].forEach(function (f) {
+      [['price', 1], ['wsPrice', 1], ['minStock', kg], ['parStock', kg], ['cost', 1]].forEach(function (f) {
         if (idx[f[0]] == null) return;
         var v = parseNum(get(f[0]));
         if (v === null) { if (f[0] !== 'price') vals[f[0]] = 0; return; }
@@ -152,6 +158,7 @@
       }
       if (idx.trackStock != null) vals.trackStock = parseBool(get('trackStock'));
       if (idx.supplier != null) vals.supplier = String(get('supplier') || '').trim();
+      ['kana', 'code'].forEach(function (k) { if (idx[k] != null) vals[k] = String(get(k) == null ? '' : get(k)).trim(); });
       if (bad.length) { out.errors.push(line + '行目（' + (name || id) + '）：' + bad.join('、') + ' が読み取れません'); return; }
 
       if (!p) {
@@ -162,14 +169,14 @@
         out.added.push({
           name: vals.name, category: vals.category || 'その他', unit: vals.unit, price: vals.unit === 'open' ? 0 : vals.price,
           taxRate: vals.taxRate || 8, wsPrice: vals.wsPrice || 0, trackStock: !!vals.trackStock, minStock: vals.minStock || 0,
-          parStock: vals.parStock || 0, supplier: vals.supplier || '', color: '#8fa3b8'
+          parStock: vals.parStock || 0, supplier: vals.supplier || '', cost: vals.cost || 0, kana: vals.kana || '', code: vals.code || '', color: '#8fa3b8'
         });
         return;
       }
       var patch = {};
       var before = {};
       Object.keys(vals).forEach(function (k) {
-        var cur = p[k] == null ? (k === 'supplier' ? '' : k === 'trackStock' ? false : 0) : p[k];
+        var cur = p[k] == null ? (k === 'supplier' || k === 'kana' || k === 'code' ? '' : k === 'trackStock' ? false : 0) : p[k];
         if (k === 'price' && p.unit === 'open' && (vals.unit || p.unit) === 'open') return;
         if (cur !== vals[k]) { patch[k] = vals[k]; before[k] = cur; }
       });

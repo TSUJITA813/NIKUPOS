@@ -434,6 +434,7 @@
       return lines.map(function (l) {
         var x = { productId: l.productId, name: l.name, unit: l.unit, price: l.price, taxRate: l.taxRate, qty: l.qty, priceMode: s.priceMode };
         x.amount = Calc.wsLineAmount(x, round());
+        if (l.cost != null) x.cost = l.cost; // 納品済みの伝票を直しても、納品時の原価はそのまま
         return x;
       });
     }
@@ -475,6 +476,12 @@
       s.customerName = c.name;
       s.date = form.date.value || today();
       s.note = form.note.value.trim();
+      // 納品したときの原価（税抜・1kg／1個あたり）を記録（利益の計算に使う）
+      if (status === 'delivered') newLines.forEach(function (l) {
+        if (l.cost != null || (l.unit !== 'g' && l.unit !== 'pc')) return;
+        var pr = POS.products().find(function (x) { return x.id === l.productId; });
+        if (pr && pr.cost) l.cost = pr.cost;
+      });
       s.lines = newLines;
       s.totals = Calc.wsTotals(newLines, round());
       s.status = status;

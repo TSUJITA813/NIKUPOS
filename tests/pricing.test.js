@@ -30,7 +30,7 @@ const products = [
 test('商品マスタ → 表（見出し・単位・kg換算）', () => {
   const rows = P.productsToRows(products, ['生肉', '惣菜', 'その他']);
   assert.equal(rows[0][0], '商品ID');
-  assert.deepEqual(rows[1], ['p1', '生肉', 'もも肉', 'グラム売り', 158, '100gあたり', 1300, '1kgあたり', '8%', '○', 5, '', '']);
+  assert.deepEqual(rows[1], ['p1', '生肉', 'もも肉', 'グラム売り', 158, '100gあたり', 1300, '1kgあたり', '8%', '○', 5, '', '', '', '', '']);
   assert.deepEqual(rows[3].slice(3, 7), ['金額入力', '', '', '']);
 });
 
@@ -70,4 +70,17 @@ test('変更の適用：価格の履歴と、卸単価が変わった商品', ()
   assert.equal(list[0].price, 168);
   assert.deepEqual(list[0].priceHistory, [{ date: '2026-12-01', price: 158, wsPrice: 1300 }]);
   assert.deepEqual(list[1].priceHistory, [{ date: '2026-12-01', price: 120, wsPrice: 0 }]);
+});
+
+test('原価・よみ・商品コードの列も取り込める（古い形式の表はそのまま）', () => {
+  const rows = P.productsToRows(products, ['生肉', '惣菜', 'その他']);
+  const h = rows[0];
+  rows[1][h.indexOf('原価（税抜・1kg／1個あたり）')] = '¥900';
+  rows[1][h.indexOf('よみ')] = 'ももにく';
+  rows[1][h.indexOf('商品コード')] = 201;
+  const plan = P.planImport(products, rows);
+  const c = plan.changes.find((x) => x.id === 'p1');
+  assert.deepEqual(c.patch, { cost: 900, kana: 'ももにく', code: '201' });
+  const old = P.productsToRows(products, ['生肉', '惣菜', 'その他']).map((r) => r.slice(0, 13));
+  assert.equal(P.planImport(products, old).changes.length, 0);
 });

@@ -76,7 +76,7 @@
     drawerAuto: true
   };
   // 全端末で共通にする設定（それ以外はこの端末だけの設定）
-  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct', 'cashlessTypes', 'promos', 'staff', 'permissions'];
+  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct', 'cashlessTypes', 'promos', 'staff', 'permissions', 'fixedCosts'];
 
   // ---------- localStorage ----------
   function read(key, fallback) {

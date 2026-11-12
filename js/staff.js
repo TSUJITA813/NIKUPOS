@@ -11,14 +11,21 @@
 
   var ACTIONS = [
     ['void', '取引の取消'], ['return', '返品・返金'], ['discount', '手動の値引き'], ['cashmove', '入出金'],
-    ['closing', 'レジの精算'], ['drawer', '会計なしで引き出しを開ける'], ['products', '商品・価格の変更'], ['settings', '設定・セールの変更・データ管理']
+    ['closing', 'レジの精算'], ['drawer', '会計なしで引き出しを開ける'], ['profit', '利益（粗利・原価・経費）を見る'], ['products', '商品・価格の変更'], ['settings', '設定・セールの変更・データ管理']
   ];
-  var DEFAULT_PERMS = { 'void': true, 'return': true, discount: true, cashmove: false, closing: false, drawer: false, products: true, settings: true };
+  var DEFAULT_PERMS = { 'void': true, 'return': true, discount: true, cashmove: false, closing: false, drawer: false, profit: true, products: true, settings: true };
   var CUR_KEY = 'nikupos.currentStaff';
   var LOCK_KEY = 'nikupos.autoLockMin';
 
   function staffList() { return POS.settings().staff || []; }
-  function perms() { var p = POS.settings().permissions; return p || DEFAULT_PERMS; }
+  function perms() {
+    var p = POS.settings().permissions || DEFAULT_PERMS;
+    // あとから増えた項目は、初期値を使う（利益の表示は、はじめは店主の承認が必要）
+    var out = {};
+    Object.keys(DEFAULT_PERMS).forEach(function (k) { out[k] = p[k] === undefined ? DEFAULT_PERMS[k] : p[k]; });
+    Object.keys(p).forEach(function (k) { if (out[k] === undefined) out[k] = p[k]; });
+    return out;
+  }
   function enabled() { return staffList().length > 0; }
   function hashPin(pin) {
     // FNV-1a（暗証番号をそのまま保存しないための簡易な変換）
@@ -35,6 +42,7 @@
   function setCurrent(s) {
     if (s) localStorage.setItem(CUR_KEY, s.id); else localStorage.removeItem(CUR_KEY);
     drawChip();
+    try { document.dispatchEvent(new Event('nikupos:staff')); } catch (e) { /* noop */ }
   }
 
   // ---------- 操作ログ ----------
@@ -47,6 +55,13 @@
     }, extra || {}));
   };
   POS.currentStaff = current;
+  /** この操作に店主の承認がいるか（今の担当者で） */
+  POS.needsApproval = function (action) {
+    if (!enabled()) return false;
+    var c = current();
+    if (c && c.role === 'owner') return false;
+    return !!perms()[action];
+  };
 
   // ---------- 権限 ----------
   POS.requirePerm = function (action, label) {
