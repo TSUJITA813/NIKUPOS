@@ -94,9 +94,10 @@
   /**
    * 支払い内訳（前受金を考慮）
    * 合計 = 前受金充当 + 現金 + キャッシュレス。前受金が合計を超えた分は現金で返金（cashがマイナス）。
+   * method: 'cash' | 'cashless' | 'split'（キャッシュレス cashlessAmount 円＋残りを現金）
    * @returns {due, deposit, cash, cashless, received, change, refund}
    */
-  function payments(total, deposit, method, received) {
+  function payments(total, deposit, method, received, cashlessAmount) {
     deposit = Math.max(0, deposit || 0);
     var due = total - deposit;
     if (due <= 0) {
@@ -104,6 +105,13 @@
     }
     if (method === 'cashless') {
       return { due: due, deposit: deposit, cash: 0, cashless: due, received: due, change: 0, refund: 0 };
+    }
+    if (method === 'split') {
+      // 併用：キャッシュレスで払う額を先に決め、残りを現金で受け取る
+      var cl = Math.min(due, Math.max(0, Math.floor(cashlessAmount || 0)));
+      var cash = due - cl;
+      if (!cash) return { due: due, deposit: deposit, cash: 0, cashless: cl, received: 0, change: 0, refund: 0 };
+      return { due: due, deposit: deposit, cash: cash, cashless: cl, received: received, change: received - cash, refund: 0 };
     }
     return { due: due, deposit: deposit, cash: due, cashless: 0, received: received, change: received - due, refund: 0 };
   }

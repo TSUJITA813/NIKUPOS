@@ -13,6 +13,7 @@
     products: 'nikupos.products',
     settings: 'nikupos.settings',
     cart: 'nikupos.cart',
+    holds: 'nikupos.holds', // 保留中の会計（この端末だけ）
     legacyStock: 'nikupos.stock', // 旧バージョンの在庫数（今は記録から計算）
     seq: 'nikupos.seq',       // 売上の取引No
     rseq: 'nikupos.rseq',     // 予約No
@@ -365,6 +366,8 @@
     },
     getCart: function () { return read(KEY.cart, null); },
     saveCart: function (cart) { return write(KEY.cart, cart); },
+    getHolds: function () { return read(KEY.holds, []); },
+    saveHolds: function (list) { return write(KEY.holds, list); },
 
     /** 重ならないID（複数の端末で同時に作っても重ならないよう乱数を付ける） */
     newId: function (prefix) {

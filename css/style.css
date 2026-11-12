@@ -143,7 +143,7 @@ h2 { font-size: 18px; margin: 16px 0 8px; }
 .sum-row { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; }
 .sum-row.total { color: var(--ink); font-size: 30px; font-weight: 800; margin-top: 4px; align-items: baseline; }
 .sum-row.total span:first-child { font-size: 16px; }
-.cart-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 12px 12px; }
+.cart-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 8px 12px 12px; }
 .cart-actions .big { grid-column: 1 / -1; }
 
 .mini-cart { display: none; }
@@ -520,3 +520,19 @@ tr.void td.act { text-decoration: none; }
 .printer-box { display: grid; gap: 8px; }
 .printer-box .btn-row { margin: 0; }
 #printerResult:empty { display: none; }
+
+/* 支払いの併用：テンキーで入れる先 */
+button.display.tap { width: 100%; border: 2px solid transparent; font: inherit; text-align: left; cursor: pointer; }
+button.display.tap.target { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+button.display.tap:not(.target) .value { opacity: .85; }
+#mHint:empty { display: none; }
+
+/* 会計の保留 */
+#btnHold.has { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.hold-item { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.hold-item .h-name { font-weight: 700; }
+.hold-item .h-sub { color: var(--muted); font-size: 13px; }
+.hold-item .h-btns { display: flex; gap: 6px; }
+.mini-hold { color: #ffd27a; font-weight: 700; }
+#btnDrawer[hidden], .btn[hidden] { display: none; }
+.cart-actions .btn:not(.big) { padding-left: 4px; padding-right: 4px; white-space: nowrap; font-size: 15px; }
