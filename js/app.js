@@ -24,6 +24,7 @@ Store.init().then(function () {
   }
   function yen(n) { n = Number(n || 0); return (n < 0 ? '-¥' : '¥') + Math.abs(n).toLocaleString('ja-JP'); }
   function num(n) { return Number(n || 0).toLocaleString('ja-JP'); }
+  function noOf(x) { return x.noLabel || x.no; }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function localDate(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function timeStr(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
@@ -670,8 +671,8 @@ Store.init().then(function () {
     var t = Calc.totals(cart.lines, cart.discount, round());
     var now = new Date();
     var sale = {
-      id: 'S' + now.getTime(),
-      no: Store.nextSeq(),
+      id: Store.newId('S'),
+      no: 0,
       at: now.toISOString(),
       date: localDate(now),
       lines: cart.lines.map(function (l) {
@@ -693,8 +694,10 @@ Store.init().then(function () {
       customer: cart.customer || '',
       void: false
     };
+    var sn = Store.makeNo('seq');
+    sale.no = sn.no;
+    sale.noLabel = sn.noLabel;
     Store.addSale(sale);
-    stockChange(sale.lines, -1);
     if (sale.reservationId) {
       var list = Store.getReservations();
       var r = list.find(function (x) { return x.id === sale.reservationId; });
@@ -711,7 +714,7 @@ Store.init().then(function () {
     openModal(
       '<div class="done-mark">✅</div>' +
       '<div class="big-change">' + big + '</div>' +
-      '<div class="sub" style="text-align:center">取引No.' + sale.no + '　合計 ' + yen(t.total) +
+      '<div class="sub" style="text-align:center">取引No.' + noOf(sale) + '　合計 ' + yen(t.total) +
       (p.deposit ? '　前受金 ' + yen(p.deposit) : '') +
       (p.cash > 0 ? '　お預かり ' + yen(p.received) : '') + '</div>' +
       '<div class="modal-foot"><button class="btn" data-act="print">レシート印刷</button>' +
@@ -744,7 +747,7 @@ Store.init().then(function () {
     h += '<div class="c" style="margin-top:4px">' + (settings.invoiceNo ? '領収書（適格簡易請求書）' : '領収書') + '</div>';
     if (sale.void) h += '<div class="voidmark">取 消</div>';
     if (reprint) h += '<div class="c">＊＊ 再発行 ＊＊</div>';
-    h += '<div class="row"><span>' + dateTimeStr(d) + '</span><span>No.' + sale.no + '</span></div>';
+    h += '<div class="row"><span>' + dateTimeStr(d) + '</span><span>No.' + noOf(sale) + '</span></div>';
     if (sale.customer) h += '<div>' + esc(sale.customer) + ' 様（ご予約）</div>';
     h += '<hr>';
     sale.lines.forEach(function (l) {
@@ -838,7 +841,7 @@ Store.init().then(function () {
     if (s.sales.length) {
       h += '<div class="table-wrap"><table><thead><tr><th>No.</th><th>時刻</th><th class="r">点数</th><th class="r">合計</th><th>支払</th><th></th></tr></thead><tbody>';
       s.sales.slice().reverse().forEach(function (x) {
-        h += '<tr class="' + (x.void ? 'void' : '') + '"><td>' + x.no + '</td><td>' + timeStr(new Date(x.at)) + '</td>' +
+        h += '<tr class="' + (x.void ? 'void' : '') + '"><td>' + noOf(x) + '</td><td>' + timeStr(new Date(x.at)) + '</td>' +
           '<td class="r">' + x.lines.length + '</td><td class="r num">' + yen(x.totals.total) + '</td>' +
           '<td>' + payLabel(x) + (x.customer ? '・' + esc(x.customer) + '様' : '') + (x.void ? '（取消）' : '') + '</td>' +
           '<td class="act"><button class="btn small" data-detail="' + x.id + '">詳細</button></td></tr>';
@@ -867,7 +870,7 @@ Store.init().then(function () {
 
   function openSaleDetail(sale) {
     openModal(
-      '<h3>取引No.' + sale.no + (sale.void ? '（取消済）' : '') + '</h3>' +
+      '<h3>取引No.' + noOf(sale) + (sale.void ? '（取消済）' : '') + '</h3>' +
       '<div class="receipt" style="width:auto;padding:8px 0;font-size:14px">' + receiptHtml(sale) + '</div>' +
       '<div class="btn-row">' +
       '<button class="btn" data-act="reprint">レシート再発行</button>' +
@@ -879,12 +882,11 @@ Store.init().then(function () {
         if (b.dataset.act === 'close') closeModal();
         if (b.dataset.act === 'reprint') printReceipt(sale, true);
         if (b.dataset.act === 'void') {
-          if (!confirm('取引No.' + sale.no + '（' + yen(sale.totals.total) + '）を取り消しますか？\n返金は手作業で行ってください。在庫は元に戻ります。' + (sale.reservationId ? '\n予約は「予約中」に戻ります。' : ''))) return;
+          if (!confirm('取引No.' + noOf(sale) + '（' + yen(sale.totals.total) + '）を取り消しますか？\n返金は手作業で行ってください。在庫は元に戻ります。' + (sale.reservationId ? '\n予約は「予約中」に戻ります。' : ''))) return;
           var x = Store.getSales().find(function (y) { return y.id === sale.id; });
           x.void = true;
           x.voidAt = new Date().toISOString();
           Store.updateSale(x);
-          stockChange(x.lines, 1);
           if (x.reservationId) {
             var rl = Store.getReservations();
             var rr = rl.find(function (y) { return y.id === x.reservationId; });
@@ -928,11 +930,11 @@ Store.init().then(function () {
     var rows = [['日付', '時刻', '取引No', '支払', '取消', '商品', '税率', '単価', '数量', '単位', '値引', '金額', '取引合計']];
     sales.forEach(function (s) {
       s.lines.forEach(function (l) {
-        rows.push([s.date, timeStr(new Date(s.at)), s.no, payLabel(s), s.void ? '取消' : '',
+        rows.push([s.date, timeStr(new Date(s.at)), noOf(s), payLabel(s), s.void ? '取消' : '',
           l.name, l.taxRate, l.price, l.unit === 'open' ? 1 : l.qty, l.unit === 'g' ? 'g' : '個', l.discountAmount || 0, l.amount, s.totals.total]);
       });
       if (s.totals.discount) {
-        rows.push([s.date, timeStr(new Date(s.at)), s.no, payLabel(s), s.void ? '取消' : '',
+        rows.push([s.date, timeStr(new Date(s.at)), noOf(s), payLabel(s), s.void ? '取消' : '',
           '小計値引', '', '', '', '', s.totals.discount, -s.totals.discount, s.totals.total]);
       }
     });
@@ -1066,7 +1068,7 @@ Store.init().then(function () {
           var minv = parseFloat(f.elements.minStock.value || '0') || 0;
           d.minStock = d.unit === 'g' ? Math.round(minv * 1000) : Math.round(minv);
           if (isNew) {
-            d.id = 'p' + Date.now();
+            d.id = Store.newId('p');
             d.order = products.reduce(function (m, x) { return Math.max(m, x.order); }, 0) + 1;
             products.push(d);
           } else {
@@ -1173,7 +1175,7 @@ Store.init().then(function () {
         (r.phone ? '<a class="resv-tel" href="tel:' + esc(r.phone.replace(/[^\d+]/g, '')) + '">' + esc(r.phone) + '</a>' : '') +
         '<span class="resv-status">' + STATUS_LABEL[r.status] + '</span></div>' +
         '<div class="resv-items">' + r.items.map(function (it) { return esc(it.name) + ' ' + itemQty(it); }).join('、') + '</div>' +
-        '<div class="resv-meta">No.' + r.no + '・概算 ' + yen(Calc.reservationEstimate(r, round())) +
+        '<div class="resv-meta">No.' + noOf(r) + '・概算 ' + yen(Calc.reservationEstimate(r, round())) +
         (r.deposit ? '・前受金 ' + depositText(r) + (r.depositRefundDate ? ' 返金済' : '') : '') + '</div>' +
         (r.note ? '<div class="resv-note">' + esc(r.note) + '</div>' : '') +
         '<div class="btn-row">' +
@@ -1240,7 +1242,7 @@ Store.init().then(function () {
       }),
       discount: null,
       reservationId: r.id,
-      reservationNo: r.no,
+      reservationNo: noOf(r),
       customer: r.name,
       deposit: r.depositRefundDate ? 0 : (r.deposit || 0)
     };
@@ -1270,7 +1272,7 @@ Store.init().then(function () {
     }).join('');
 
     openModal(
-      '<h3>' + (isNew ? '新規予約' : '予約 No.' + r.no + ' の編集') + '</h3>' +
+      '<h3>' + (isNew ? '新規予約' : '予約 No.' + noOf(r) + ' の編集') + '</h3>' +
       '<form class="form" id="rForm" onsubmit="return false" style="margin-top:10px">' +
       '<label>お名前<input name="name" value="' + esc(r.name) + '" autocomplete="off"></label>' +
       '<label>電話番号<input name="phone" type="tel" inputmode="tel" value="' + esc(r.phone) + '" autocomplete="off"></label>' +
@@ -1365,8 +1367,10 @@ Store.init().then(function () {
       }
       var list = Store.getReservations();
       if (isNew) {
-        r.id = 'R' + Date.now();
-        r.no = Store.nextReservationNo();
+        r.id = Store.newId('R');
+        var rn = Store.makeNo('rseq');
+        r.no = rn.no;
+        r.noLabel = rn.noLabel;
         r.createdAt = new Date().toISOString();
         list.push(r);
       } else {
@@ -1379,7 +1383,7 @@ Store.init().then(function () {
       resvScope = 'day';
       resvQuery = '';
       renderReservations();
-      toast(isNew ? '予約 No.' + r.no + ' を登録しました' : '予約を保存しました');
+      toast(isNew ? '予約 No.' + noOf(r) + ' を登録しました' : '予約を保存しました');
     }
 
     drawItems();
@@ -1390,7 +1394,7 @@ Store.init().then(function () {
     if (cart.reservationId === r.id) { alert('この予約はレジで会計中です。レジの「全取消」をしてから取り消してください。'); return; }
     var hasDeposit = r.deposit > 0 && !r.depositRefundDate;
     openModal(
-      '<h3>予約 No.' + r.no + ' を取り消しますか？</h3>' +
+      '<h3>予約 No.' + noOf(r) + ' を取り消しますか？</h3>' +
       '<div class="sub">' + esc(r.name) + ' 様・' + weekday(r.date) + ' ' + (r.time || '') + '</div>' +
       (hasDeposit ? '<p>前受金 <b>' + depositText(r) + '</b> を受け取っています。</p>' : '') +
       '<div class="btn-row" style="flex-direction:column;align-items:stretch">' +
@@ -1446,7 +1450,7 @@ Store.init().then(function () {
     Store.getReservations().filter(function (r) { return r.date === date && Calc.isActiveReservation(r); })
       .sort(function (a, b) { return (a.time || '99').localeCompare(b.time || '99'); })
       .forEach(function (r) {
-        h += '<div style="margin-top:4px"><b>' + (r.time || '--:--') + ' ' + esc(r.name) + ' 様</b>（No.' + r.no + '）</div>';
+        h += '<div style="margin-top:4px"><b>' + (r.time || '--:--') + ' ' + esc(r.name) + ' 様</b>（No.' + noOf(r) + '）</div>';
         r.items.forEach(function (it) { h += '<div class="row ind"><span>' + esc(it.name) + '</span><span>' + itemQty(it) + '</span></div>'; });
         if (r.note) h += '<div class="ind">※' + esc(r.note) + '</div>';
       });
@@ -1457,7 +1461,7 @@ Store.init().then(function () {
   function printResvSlip(r) {
     var h = '<div class="c title">ご予約票</div><div class="c">' + esc(settings.storeName) + '</div>';
     if (settings.tel) h += '<div class="c">TEL ' + esc(settings.tel) + '</div>';
-    h += '<hr>' + row('予約番号', 'No.' + r.no);
+    h += '<hr>' + row('予約番号', 'No.' + noOf(r));
     h += '<div class="big">' + esc(r.name) + ' 様</div>';
     if (r.phone) h += row('電話番号', esc(r.phone));
     h += row('お受取', weekday(r.date) + ' ' + (r.time || '')) + '<hr>';
@@ -1486,6 +1490,10 @@ Store.init().then(function () {
     });
     $('installNote').innerHTML = installHint();
     renderScaleSettings();
+    renderSyncSettings();
+    $('dataNote').textContent = Sync.config().enabled
+      ? 'データはこの端末とクラウドの両方に保存されています。念のため、ときどきバックアップも保存してください。'
+      : 'データはこの端末のブラウザ内にだけ保存されます。定期的にバックアップを保存してください。';
   }
 
   function renderScaleSettings() {
@@ -1549,7 +1557,7 @@ Store.init().then(function () {
       var data;
       try { data = JSON.parse(reader.result); } catch (err) { alert('復元できませんでした：ファイルを読み取れません'); return; }
       Store.importAll(data).then(function () {
-        alert('復元しました。アプリを再読み込みします。');
+        alert('復元しました。アプリを再読み込みします。' + (Sync.config().enabled ? '\n他の端末にも反映するには、設定の「この端末のデータを送り直す」を押してください。' : ''));
         location.reload();
       }).catch(function (err) {
         alert('復元できませんでした：' + err.message);
@@ -1599,24 +1607,30 @@ Store.init().then(function () {
    * 在庫を増減する。move を渡すと在庫履歴に残す。
    * 店頭販売は件数が多いので履歴には残さない（売上データから集計できる）。
    */
-  var moveSeq = 0;
+  /**
+   * 在庫の記録（入荷・加工・廃棄・調整・棚卸）を残す。在庫数は記録・売上・卸伝票から計算される。
+   * 店頭の販売と卸の納品は、それぞれのデータから自動で在庫に反映されるので、ここでは記録しない。
+   * move.actual を渡すと棚卸（その時点の実在庫）として記録する。
+   */
   function stockChange(lines, sign, move) {
-    var stock = Store.getStock();
-    var changed = Calc.applyStock(stock, lines, sign, trackedMap());
-    if (!changed.length) return changed;
-    Store.saveStock(stock);
-    if (move) {
-      var at = new Date();
-      Store.addMoves(changed.map(function (c) {
-        return {
-          id: 'M' + at.getTime() + '-' + (moveSeq++), at: at.toISOString(), date: localDate(at),
-          type: move.type, productId: c.productId, name: c.name, delta: c.delta, after: stock[c.productId],
-          cost: move.cost || null, supplier: move.supplier || '', ref: move.ref || '', note: move.note || ''
-        };
-      }));
-    }
+    var tracked = trackedMap();
+    var at = new Date();
+    var list = lines.filter(function (l) { return l.productId && l.unit !== 'open' && tracked[l.productId]; }).map(function (l) {
+      var m = {
+        id: Store.newId('M'), at: at.toISOString(), date: localDate(at),
+        type: move.type, productId: l.productId, name: l.name, delta: sign * l.qty,
+        cost: move.cost || null, supplier: move.supplier || '', ref: move.ref || '', note: move.note || ''
+      };
+      if (move.actual != null) m.actual = move.actual;
+      return m;
+    });
+    if (!list.length) return list;
+    Store.addMoves(list);
+    var st = Store.getStock();
+    list.forEach(function (m) { m.after = st[m.productId]; });
+    Store.C.moves.saveAll(Store.getMoves());
     refreshBadges();
-    return changed;
+    return list;
   }
 
   var badgeFns = [updateResvBadge];
@@ -1646,6 +1660,138 @@ Store.init().then(function () {
   };
   (window.NIKUPOS_MODULES || []).forEach(function (init) { init(POS); });
 
+  // ================= クラウド同期の設定 =================
+  var SYNC_STATE = { off: '使っていません', idle: '同期済み', syncing: '同期中…', offline: 'オフライン（つながったら送ります）', error: 'エラー' };
+  function syncStateClass(st) {
+    if (st.state === 'idle' && st.pending) return 'pending';
+    return st.state;
+  }
+  function updateSyncDot() {
+    var st = Sync.status();
+    var dot = $('syncDot');
+    dot.hidden = st.state === 'off';
+    dot.className = 'sync-dot ' + syncStateClass(st);
+    dot.title = SYNC_STATE[st.state] + (st.pending ? '（送信待ち ' + st.pending + '件）' : '');
+  }
+  $('syncDot').addEventListener('click', function () { showView('settings'); });
+  Sync.onStatus(function () {
+    updateSyncDot();
+    if ($('view-settings').classList.contains('active') && !$('syncForm')) renderSyncSettings();
+  });
+
+  function renderSyncSettings() {
+    var st = Sync.status();
+    var cfg = Sync.config();
+    var h = '<div class="sync-box">';
+    if (cfg.enabled) {
+      var last = st.lastSync ? new Date(st.lastSync) : null;
+      h += '<div class="sync-state"><span class="sync-dot ' + syncStateClass(st) + '"></span>' + SYNC_STATE[st.state] + '</div>' +
+        (st.error ? '<p class="note" style="color:var(--danger)">' + esc(st.error) + '</p>' : '') +
+        '<p class="note">この端末の記号：<b>' + esc(settings.deviceCode || '（未設定）') + '</b>　ログイン：' + esc(cfg.email || '') + '<br>' +
+        '最終同期：' + (last ? (last.getMonth() + 1) + '/' + last.getDate() + ' ' + timeStr(last) : '—') +
+        (st.pending ? '　送信待ち：' + num(st.pending) + '件' : '') + '</p>' +
+        '<div class="btn-row"><button class="btn primary small" data-sync="now">今すぐ同期</button>' +
+        '<button class="btn small" data-sync="resend">この端末のデータを送り直す</button>' +
+        '<button class="btn small danger-outline" data-sync="off">この端末の同期をやめる</button></div>';
+    } else {
+      h += '<p class="note">店頭のレジと卸用の端末など、複数の端末で同じデータ（商品・売上・予約・卸・在庫）を使えます。' +
+        'Googleの「Firebase」（無料プランで利用可）にお店用のアカウントを作り、その情報を入れてください。手順はREADMEにあります。</p>' +
+        '<form class="form" id="syncForm" onsubmit="return false">' +
+        '<label>この端末の記号（伝票番号の頭に付きます。端末ごとに別の記号に）<input name="deviceCode" maxlength="3" value="' + esc(settings.deviceCode || '') + '" placeholder="例：店頭は A、卸は B" autocomplete="off"></label>' +
+        '<label>Firebase の APIキー<input name="apiKey" autocomplete="off" spellcheck="false"></label>' +
+        '<label>プロジェクトID<input name="projectId" autocomplete="off" spellcheck="false"></label>' +
+        '<label>お店用のメールアドレス<input name="email" type="email" autocomplete="username"></label>' +
+        '<label>パスワード<input name="password" type="password" autocomplete="current-password"></label>' +
+        '<button type="button" class="btn primary" data-sync="connect">接続する</button></form>';
+    }
+    h += '</div>';
+    $('syncSettings').innerHTML = h;
+  }
+
+  $('syncSettings').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-sync]');
+    if (!b) return;
+    var act = b.dataset.sync;
+    if (act === 'now') { Sync.syncNow(); return; }
+    if (act === 'resend') {
+      if (confirm('この端末のデータをすべてクラウドに送り直します（バックアップから復元した後などに使います）。よろしいですか？')) Sync.resendAll();
+      return;
+    }
+    if (act === 'off') {
+      if (!confirm('この端末の同期をやめますか？（この端末のデータは残ります。クラウドのデータも消えません）')) return;
+      Sync.disconnect();
+      renderSyncSettings();
+      return;
+    }
+    if (act === 'connect') {
+      var f = $('syncForm').elements;
+      var code = f.deviceCode.value.trim().toUpperCase();
+      var o = { apiKey: f.apiKey.value.trim(), projectId: f.projectId.value.trim(), email: f.email.value.trim(), password: f.password.value };
+      if (!/^[A-Z0-9]{1,3}$/.test(code)) { alert('この端末の記号を、英数字1〜3文字で入れてください（例：A）'); return; }
+      if (!o.apiKey || !o.projectId || !o.email || !o.password) { alert('APIキー・プロジェクトID・メールアドレス・パスワードを入れてください'); return; }
+      settings.deviceCode = code;
+      Store.saveSettings(settings);
+      toast('ログインを確認しています…');
+      Sync.checkLogin(o).then(function () { askAndConnect(o); }, function (err) { connectFailed(err); });
+    }
+  });
+
+  function askAndConnect(o) {
+    var count = Store.localDataCount();
+    if (count) {
+        openModal(
+          '<h3>この端末のデータをどうしますか？</h3>' +
+          '<p>この端末には、売上・予約・卸などのデータが ' + num(count) + '件あります。</p>' +
+          '<div class="btn-row" style="flex-direction:column;align-items:stretch">' +
+          '<button class="btn primary" data-m="merge">クラウドに送って共有する（いつも使っている端末）</button>' +
+          '<button class="btn danger-outline" data-m="cloud">この端末のデータを消して、クラウドのデータを使う（試しに使った端末）</button>' +
+          '<button class="btn" data-m="back">やめる</button></div>',
+          function (ev) {
+            var x = ev.target.closest('[data-m]');
+            if (!x) return;
+            closeModal();
+            if (x.dataset.m === 'back') return;
+            if (x.dataset.m === 'cloud' && !confirm('この端末の売上・予約・卸・在庫の記録を消します。よろしいですか？')) return;
+            doConnect(o, x.dataset.m);
+          }
+        );
+    } else doConnect(o, 'merge');
+  }
+
+  function doConnect(o, mode) {
+    o.mode = mode;
+    toast('接続しています…');
+    Sync.connect(o).then(function () {
+      products = Store.getProducts();
+      settings = Store.getSettings();
+      applyStoreName();
+      renderSettings();
+      toast('接続しました');
+    }).catch(connectFailed);
+  }
+  function connectFailed(err) {
+    var m = err && err.message || '';
+    var msg = /INVALID_PASSWORD|INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND|INVALID_EMAIL/.test(m) ? 'メールアドレスまたはパスワードが違います。'
+      : /API key|API_KEY/.test(m) ? 'APIキーが正しくありません。'
+        : err && err.status === 403 ? 'データへのアクセスが許可されていません（Firestoreのルール設定を確認してください）。'
+          : err && err.status === 404 ? 'プロジェクトIDが正しくないか、Firestoreが作成されていません。'
+            : !err || !err.status ? 'インターネットに接続できませんでした。' : m;
+    alert('接続できませんでした：' + msg);
+    if (!$('syncForm')) renderSyncSettings(); // 入力欄はそのまま残す
+  }
+
+  // 別の端末で変更されたデータが届いたら、画面を新しくする
+  Store.onRemoteChange(function () {
+    products = Store.getProducts();
+    settings = Store.getSettings();
+    applyStoreName();
+    if (!modal.hidden) { refreshBadges(); return; } // 入力中は画面を書き換えない
+    var active = document.querySelector('.view.active');
+    var name = active ? active.id.replace('view-', '') : 'register';
+    if (name === 'settings') { renderSyncSettings(); refreshBadges(); return; }
+    showView(name);
+  });
+
   // ================= 起動 =================
   applyStoreName();
   tick();
@@ -1653,6 +1799,8 @@ Store.init().then(function () {
   currentCat = '__all';
   renderRegister();
   refreshBadges();
+  Sync.start();
+  updateSyncDot();
   setInterval(refreshBadges, 60000);
 
   // ブラウザにデータを消されにくくする（対応ブラウザのみ）

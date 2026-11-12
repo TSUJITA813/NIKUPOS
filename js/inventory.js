@@ -1,6 +1,7 @@
 /*
  * 在庫管理（入荷・加工・廃棄/調整・棚卸、引当、発注点）
- * 店頭の会計・卸の納品で自動的に在庫が減り、取消で戻る（app.js / wholesale.js から stockChange を呼ぶ）。
+ * 在庫数は「在庫の記録」「店頭の売上」「卸の伝票」から毎回計算する（Calc.computeStock）。
+ * そのため複数の端末で同時に販売・納品しても、どの端末でも同じ在庫数になる。
  */
 (window.NIKUPOS_MODULES = window.NIKUPOS_MODULES || []).push(function (POS) {
   'use strict';
@@ -96,12 +97,29 @@
       '<p class="note">引当＝今日以降の予約（未受渡）と卸の受注（未納品）の合計。商品をタップすると履歴を表示します。' +
       (value ? '　在庫金額（仕入単価ベース）約 ' + yen(value) : '') + '</p>';
 
-    var moves = Store.getMoves().slice(-30).reverse();
+    var tr = POS.trackedMap();
+    var moves = allMoves().filter(function (m) { return tr[m.productId]; }).slice(-30).reverse();
     h += '<h2>最近の入出庫</h2>';
     h += moves.length ? movesTable(moves, true) : '<p class="note">まだ記録がありません。入荷や棚卸をすると、ここに表示されます。店頭販売の分は、売上データから自動で在庫を減らします（ここには表示しません）。</p>';
     $('invRoot').innerHTML = h;
   }
   POS.views.inventory = render;
+
+  /** 在庫の記録 ＋ 卸の納品・取消（伝票から作る） */
+  function allMoves() {
+    var out = Store.getMoves().slice();
+    Store.getSlips().forEach(function (s) {
+      if (!s.deliveredAt) return;
+      var ref = '卸No.' + (s.noLabel || s.no);
+      s.lines.forEach(function (l) {
+        out.push({ at: s.deliveredAt, type: 'wholesale', productId: l.productId, name: l.name, delta: -l.qty, ref: ref, note: s.customerName });
+        if (s.status === 'cancelled' && s.cancelledAt) {
+          out.push({ at: s.cancelledAt, type: 'wholesale', productId: l.productId, name: l.name, delta: l.qty, ref: ref, note: '取消' });
+        }
+      });
+    });
+    return out.sort(function (a, b) { return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
+  }
 
   function movesTable(moves, withName) {
     return '<div class="table-wrap"><table><thead><tr><th>日時</th>' + (withName ? '<th>商品</th>' : '') +
@@ -380,7 +398,7 @@
             if (!isFinite(actual) || actual < 0) return;
             var delta = actual - (Store.getStock()[p.id] || 0);
             if (!delta) return;
-            POS.stockChange([{ productId: p.id, name: p.name, unit: p.unit, qty: delta }], 1, { type: 'count', note: '実在庫 ' + fmtQty(p.unit, actual) });
+            POS.stockChange([{ productId: p.id, name: p.name, unit: p.unit, qty: delta }], 1, { type: 'count', actual: actual, note: '実在庫 ' + fmtQty(p.unit, actual) });
             n++;
           });
           POS.closeModal();
@@ -395,7 +413,7 @@
   // ---------- 商品ごとの履歴 ----------
   function openHistory(p) {
     if (!p) return;
-    var moves = Store.getMoves().filter(function (m) { return m.productId === p.id; }).slice(-50).reverse();
+    var moves = allMoves().filter(function (m) { return m.productId === p.id; }).slice(-50).reverse();
     // 店頭販売は売上データから集計（直近7日）
     var days = [];
     var d0 = new Date();

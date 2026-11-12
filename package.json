@@ -5,6 +5,7 @@
   "description": "町の鶏肉屋さん向け 店頭販売POSレジ（PWA）",
   "scripts": {
     "start": "python3 -m http.server 8080",
-    "test": "node --test"
+    "test": "node --test",
+    "mock-firebase": "node tools/mock-firebase.js 9199"
   }
 }

@@ -17,6 +17,7 @@
   var PAY = { credit: '掛け', cash: '現金' };
   var METHOD = { cash: '現金', transfer: '振込', other: 'その他' };
 
+  function noOf(x) { return x.noLabel || x.no; }
   function today() { return POS.localDate(new Date()); }
   function round() { return POS.round(); }
   function settings() { return POS.settings(); }
@@ -26,8 +27,17 @@
   function qtyText(l) { return l.unit === 'g' ? kg(l.qty) : num(l.qty) + '個'; }
   function unitPriceText(l) { return yen(l.price) + (l.unit === 'g' ? '/kg' : '/個'); }
   function closingText(c) {
-    if (c.payment !== 'credit') return '現金（納品時）';
-    return '掛け・' + (c.closingDay >= 29 ? '月末' : '毎月' + c.closingDay + '日') + '締め';
+    var mode = c.priceMode === 'incl' ? '・税込単価' : '';
+    if (c.payment !== 'credit') return '現金（納品時）' + mode;
+    return '掛け・' + (c.closingDay >= 29 ? '月末' : '毎月' + c.closingDay + '日') + '締め' + mode;
+  }
+  function modeOf(x) { return x && x.priceMode === 'incl' ? 'incl' : 'excl'; }
+  function modeLabel(m) { return m === 'incl' ? '税込' : '税抜'; }
+  /** 取引先に合わせた単価の初期値（記憶した単価 → 商品マスタの卸単価。税込の取引先は税込に換算） */
+  function defaultPrice(c, p) {
+    if (c && c.prices && c.prices[p.id]) return c.prices[p.id];
+    var base = p.wsPrice || 0;
+    return modeOf(c) === 'incl' ? Math.round((base * (100 + p.taxRate)) / 100) : base;
   }
   function sortedCustomers() {
     return Store.getCustomers().slice().sort(function (a, b) { return (a.kana || a.name).localeCompare(b.kana || b.name, 'ja'); });
@@ -77,7 +87,7 @@
       '<span class="pill gray">' + PAY[s.payment] + '</span>' +
       (s.invoiceId ? '<span class="pill gray">請求済</span>' : '') +
       '<span class="li-amt">' + yen(s.totals.total) + '</span></div>' +
-      '<div class="li-sub">No.' + s.no + '・' + POS.weekday(s.date) + (s.status === 'order' ? ' 納品予定' : '') + '・税抜 ' + yen(s.totals.subtotal) + '</div>' +
+      '<div class="li-sub">No.' + noOf(s) + '・' + POS.weekday(s.date) + (s.status === 'order' ? ' 納品予定' : '') + (modeOf(s) === 'incl' ? '・税込単価' : '・税抜 ' + yen(s.totals.subtotal)) + '</div>' +
       '<div style="margin-top:4px">' + s.lines.map(function (l) { return esc(l.name) + ' ' + qtyText(l); }).join('、') + '</div>' +
       (s.note ? '<div class="resv-note">' + esc(s.note) + '</div>' : '') +
       (btns ? '<div class="btn-row">' + btns + '</div>' : '') + '</div>';
@@ -157,13 +167,13 @@
         return '<tr><td>' + esc(c ? c.name : '') + '</td><td class="r">' + pending[cid].n + '件</td><td class="r num">' + yen(pending[cid].total) + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="note">ありません。</p>';
 
-    var invs = Store.getInvoices().slice().sort(function (a, b) { return b.no - a.no; }).slice(0, 50);
+    var invs = Store.getInvoices().slice().sort(function (a, b) { return (b.createdAt || '').localeCompare(a.createdAt || '') || b.no - a.no; }).slice(0, 50);
     var latest = {};
-    Store.getInvoices().forEach(function (i) { if (!latest[i.customerId] || latest[i.customerId].no < i.no) latest[i.customerId] = i; });
+    Store.getInvoices().forEach(function (i) { if (!latest[i.customerId]) latest[i.customerId] = Calc.latestInvoice(i.customerId, Store.getInvoices()); });
     h += '<h2>請求書</h2>';
     h += invs.length ? invs.map(function (i) {
       return '<div class="list-item"><div class="li-top"><span class="li-title">' + esc(i.customerName) + '</span>' +
-        '<span class="li-sub">No.' + i.no + '・' + i.periodTo + ' 締め</span>' +
+        '<span class="li-sub">No.' + noOf(i) + '・' + i.periodTo + ' 締め</span>' +
         '<span class="li-amt">' + yen(i.billed) + '</span></div>' +
         '<div class="li-sub">今回お買上 ' + yen(i.purchase) + '（うち消費税 ' + yen(i.tax) + '）・繰越 ' + yen(i.carry) + '・発行 ' + i.issueDate + '</div>' +
         '<div class="btn-row"><button class="btn" data-b="print" data-id="' + i.id + '">印刷</button>' +
@@ -247,6 +257,7 @@
     };
     var cust = function () { return customerById(s.customerId); };
     if (!s.payment) s.payment = cust() ? cust().payment : 'credit';
+    if (!s.priceMode) s.priceMode = isNew ? modeOf(cust()) : 'excl';
     var lines = s.lines.map(function (l) {
       return { productId: l.productId, name: l.name, unit: l.unit, price: l.price, taxRate: l.taxRate, qty: l.qty, qtyText: inv().qtyInputValue(l.unit, l.qty) };
     });
@@ -258,7 +269,7 @@
       }).join('') + '</optgroup>' : '';
     }).join('');
 
-    var title = isNew ? '新規伝票' : (deliverIntent ? '納品（No.' + s.no + '）' : '伝票 No.' + s.no);
+    var title = isNew ? '新規伝票' : (deliverIntent ? '納品（No.' + noOf(s) + '）' : '伝票 No.' + noOf(s));
     var foot = s.status === 'delivered'
       ? '<button class="btn" data-act="cancel">キャンセル</button><button class="btn primary" data-act="save">保存</button>'
       : '<button class="btn" data-act="order">受注で保存</button><button class="btn primary" data-act="deliver">納品済にする</button>';
@@ -270,7 +281,7 @@
         return '<option value="' + c.id + '"' + (c.id === s.customerId ? ' selected' : '') + '>' + esc(c.name) + '</option>';
       }).join('') + '</select></label>' +
       '<label>納品日<input type="date" name="date" value="' + esc(s.date) + '"></label>' +
-      '<div><div class="wsline-head"><span>商品</span><span>数量</span><span>単価(税抜)</span><span></span></div>' +
+      '<div><div class="wsline-head"><span>商品</span><span>数量</span><span id="wPriceHead"></span><span></span></div>' +
       '<div id="wLines"></div>' +
       '<div class="radd"><select id="wSel">' + options + '</select><button type="button" class="btn" data-act="add">＋ 追加</button></div>' +
       '<div class="tot-box" id="wTot"></div></div>' +
@@ -285,7 +296,7 @@
         if (b.dataset.act === 'add') {
           var p = productById($('wSel').value);
           var c = cust();
-          var price = (c && c.prices && c.prices[p.id]) || p.wsPrice || 0;
+          var price = defaultPrice(c, p);
           lines.push({ productId: p.id, name: p.name, unit: p.unit, price: price, taxRate: p.taxRate, qty: 0, qtyText: '' });
           drawLines();
           var ins = POS.modalBody.querySelectorAll('#wLines input[data-f="q"]');
@@ -309,11 +320,12 @@
       var c = cust();
       if (c) {
         s.payment = c.payment;
+        s.priceMode = modeOf(c);
         // まだ単価を手で変えていない行は、この取引先の単価に合わせる
         lines.forEach(function (l) {
           if (l.priceEdited) return;
           var p = productById(l.productId);
-          l.price = (c.prices && c.prices[l.productId]) || (p && p.wsPrice) || l.price;
+          if (p) l.price = defaultPrice(c, p);
         });
       }
       drawLines();
@@ -347,16 +359,20 @@
     }
     function calcLines() {
       return lines.map(function (l) {
-        var x = { productId: l.productId, name: l.name, unit: l.unit, price: l.price, taxRate: l.taxRate, qty: l.qty };
+        var x = { productId: l.productId, name: l.name, unit: l.unit, price: l.price, taxRate: l.taxRate, qty: l.qty, priceMode: s.priceMode };
         x.amount = Calc.wsLineAmount(x, round());
         return x;
       });
     }
     function drawTotals() {
       var t = Calc.wsTotals(calcLines(), round());
-      $('wTot').innerHTML = '<div class="sum-row"><span>小計（税抜）</span><span class="num">' + yen(t.subtotal) + '</span></div>' +
+      var incl = s.priceMode === 'incl';
+      $('wPriceHead').textContent = '単価(' + modeLabel(s.priceMode) + ')';
+      $('wTot').innerHTML = (incl ? '' : '<div class="sum-row"><span>小計（税抜）</span><span class="num">' + yen(t.subtotal) + '</span></div>') +
         t.byRate.map(function (r) {
-          return '<div class="sum-row"><span>' + r.rate + '%対象 ' + yen(r.amount) + '</span><span class="num">消費税 ' + yen(r.tax) + '</span></div>';
+          return incl
+            ? '<div class="sum-row"><span>' + r.rate + '%対象（税込） ' + yen(r.incl) + '</span><span class="num">うち消費税 ' + yen(r.tax) + '</span></div>'
+            : '<div class="sum-row"><span>' + r.rate + '%対象 ' + yen(r.amount) + '</span><span class="num">消費税 ' + yen(r.tax) + '</span></div>';
         }).join('') +
         '<div class="sum-row total"><span>合計（税込）</span><span class="num">' + yen(t.total) + '</span></div>';
     }
@@ -384,8 +400,10 @@
 
       var list = Store.getSlips();
       if (isNew) {
-        s.id = 'W' + Date.now();
-        s.no = Store.nextSlipNo();
+        s.id = Store.newId('W');
+        var sn = Store.makeNo('wseq');
+        s.no = sn.no;
+        s.noLabel = sn.noLabel;
         s.createdAt = new Date().toISOString();
         list.push(s);
       } else {
@@ -393,9 +411,7 @@
       }
       Store.saveSlips(list);
 
-      // 在庫：納品済の分だけ減らす（修正時は差分）
-      var diff = diffLines(wasDelivered ? orig.lines : [], status === 'delivered' ? newLines : []);
-      if (diff.length) POS.stockChange(diff, -1, { type: 'wholesale', ref: '卸No.' + s.no, note: c.name });
+      // 在庫は「納品済」の伝票から自動で計算される（ここでは記録しない）
 
       // 取引先ごとの単価を記憶
       c.prices = c.prices || {};
@@ -419,11 +435,10 @@
 
   function cancelSlip(s) {
     if (s.invoiceId) { alert('請求書に含まれている伝票は取り消せません。先に請求書を作り直してください。'); return; }
-    if (!confirm('伝票No.' + s.no + '（' + s.customerName + '・' + yen(s.totals.total) + '）を取り消しますか？' +
+    if (!confirm('伝票No.' + noOf(s) + '（' + s.customerName + '・' + yen(s.totals.total) + '）を取り消しますか？' +
       (s.status === 'delivered' ? '\n在庫は元に戻ります。' : ''))) return;
     var list = Store.getSlips();
     var x = list.find(function (y) { return y.id === s.id; });
-    if (x.status === 'delivered') POS.stockChange(diffLines(x.lines, []), -1, { type: 'wholesale', ref: '卸No.' + x.no, note: '取消' });
     x.status = 'cancelled';
     x.cancelledAt = new Date().toISOString();
     Store.saveSlips(list);
@@ -435,7 +450,8 @@
   // ================= 取引先 =================
   function openCustomerModal(orig) {
     var isNew = !orig;
-    var c = orig ? JSON.parse(JSON.stringify(orig)) : { name: '', person: '', tel: '', address: '', payment: 'credit', closingDay: 31, note: '', prices: {} };
+    var c = orig ? JSON.parse(JSON.stringify(orig)) : { name: '', person: '', tel: '', address: '', payment: 'credit', closingDay: 31, priceMode: 'excl', note: '', prices: {} };
+    var origMode = modeOf(c);
     var days = [5, 10, 15, 20, 25, 31];
     var used = !isNew && Store.getSlips().some(function (s) { return s.customerId === c.id; });
     POS.openModal(
@@ -447,6 +463,8 @@
       '<label>住所<input name="address" value="' + esc(c.address) + '" autocomplete="off"></label>' +
       '<label>お支払い<div class="seg"><button type="button" class="btn small" data-pay="credit">掛け（締め日に請求）</button>' +
       '<button type="button" class="btn small" data-pay="cash">現金（納品時）</button></div></label>' +
+      '<label>単価の扱い<div class="seg"><button type="button" class="btn small" data-mode="excl">税抜（消費税は別）</button>' +
+      '<button type="button" class="btn small" data-mode="incl">税込（消費税込み）</button></div></label>' +
       '<label id="cClose">締め日<select name="closingDay">' + days.map(function (d) {
         return '<option value="' + d + '"' + (d === c.closingDay ? ' selected' : '') + '>' + (d === 31 ? '月末' : '毎月' + d + '日') + '</option>';
       }).join('') + '</select></label>' +
@@ -458,6 +476,7 @@
         var b = e.target.closest('button');
         if (!b) return;
         if (b.dataset.pay) { c.payment = b.dataset.pay; draw(); }
+        else if (b.dataset.mode) { c.priceMode = b.dataset.mode; draw(); }
         else if (b.dataset.act === 'cancel') POS.closeModal();
         else if (b.dataset.act === 'del') {
           if (!confirm('「' + c.name + '」を削除しますか？')) return;
@@ -472,9 +491,13 @@
           c.tel = f.tel.value.trim();
           c.address = f.address.value.trim();
           c.closingDay = Number(f.closingDay.value);
+          if (modeOf(c) !== origMode && c.prices && Object.keys(c.prices).length &&
+            confirm('単価の扱いを変えました。この取引先で覚えている単価をリセットしますか？\n（リセットすると、次の伝票から商品マスタの卸単価を' + modeLabel(modeOf(c)) + 'に換算して使います）')) {
+            c.prices = {};
+          }
           c.note = f.note.value.trim();
           var list = Store.getCustomers();
-          if (isNew) { c.id = 'C' + Date.now(); list.push(c); }
+          if (isNew) { c.id = Store.newId('C'); list.push(c); }
           else list[list.findIndex(function (x) { return x.id === c.id; })] = c;
           Store.saveCustomers(list);
           POS.closeModal();
@@ -487,6 +510,7 @@
     function draw() {
       POS.modalBody.querySelectorAll('[data-pay]').forEach(function (x) { x.classList.toggle('on', x.dataset.pay === c.payment); });
       $('cClose').style.display = c.payment === 'credit' ? '' : 'none';
+      POS.modalBody.querySelectorAll('[data-mode]').forEach(function (x) { x.classList.toggle('on', x.dataset.mode === modeOf(c)); });
     }
     draw();
   }
@@ -520,7 +544,7 @@
           var amount = Math.floor(Number(f.amount.value) || 0);
           if (!(amount > 0)) { alert('金額を入力してください'); return; }
           var list = Store.getReceipts();
-          list.push({ id: 'P' + Date.now(), customerId: f.customer.value, date: f.date.value || today(), amount: amount, method: method, note: f.note.value.trim() });
+          list.push({ id: Store.newId('P'), customerId: f.customer.value, date: f.date.value || today(), amount: amount, method: method, note: f.note.value.trim() });
           Store.saveReceipts(list);
           POS.closeModal();
           render();
@@ -543,7 +567,8 @@
   function createInvoice(c, periodTo) {
     var inv0 = Calc.buildInvoice(c.id, periodTo, Store.getSlips(), Store.getReceipts(), Store.getInvoices(), round());
     if (!inv0.slipIds.length && !inv0.receiptIds.length && !inv0.carry) return null;
-    var i = Object.assign({ id: 'I' + Date.now() + Math.floor(Math.random() * 1000), no: Store.nextInvoiceNo(), issueDate: today(), customerName: c.name }, inv0);
+    var n = Store.makeNo('iseq');
+    var i = Object.assign({ id: Store.newId('I'), no: n.no, noLabel: n.noLabel, createdAt: new Date().toISOString(), issueDate: today(), customerName: c.name }, inv0);
     var invs = Store.getInvoices();
     invs.push(i);
     Store.saveInvoices(invs);
@@ -618,7 +643,7 @@
   }
 
   function undoInvoice(i) {
-    if (!confirm('請求書No.' + i.no + '（' + i.customerName + '）を取り消して作り直せるようにしますか？')) return;
+    if (!confirm('請求書No.' + noOf(i) + '（' + i.customerName + '）を取り消して作り直せるようにしますか？')) return;
     Store.saveInvoices(Store.getInvoices().filter(function (x) { return x.id !== i.id; }));
     var slips = Store.getSlips();
     slips.forEach(function (s) { if (s.invoiceId === i.id) delete s.invoiceId; });
@@ -641,16 +666,24 @@
     var p = d.split('-').map(Number);
     return p[0] + '年' + p[1] + '月' + p[2] + '日';
   }
-  function rateRows(byRate) {
+  /** 税率ごとの対象額と消費税（税込の取引は税込の対象額と「うち消費税」） */
+  function rateRows(byRate, mode) {
     return byRate.map(function (r) {
-      return '<tr><th>' + r.rate + '%対象' + (r.rate === 8 ? '（軽減税率）' : '') + '</th><td>' + yen(r.amount) + '</td><th>消費税（' + r.rate + '%）</th><td>' + yen(r.tax) + '</td></tr>';
+      var label = r.rate + '%対象' + (r.rate === 8 ? '（軽減税率）' : '');
+      if (mode === 'incl') {
+        return '<tr><th>' + label + '（税込）</th><td>' + yen(r.incl != null ? r.incl : r.amount + r.tax) + '</td><th>うち消費税（' + r.rate + '%）</th><td>' + yen(r.tax) + '</td></tr>';
+      }
+      return '<tr><th>' + label + '（税抜）</th><td>' + yen(r.amount) + '</td><th>消費税（' + r.rate + '%）</th><td>' + yen(r.tax) + '</td></tr>';
     }).join('');
   }
-  function lineRows(lines, withDate, date, no) {
+  /** 明細行。docMode と違う扱いの行には（税込）/（税抜）を付ける */
+  function lineRows(lines, withDate, date, no, docMode) {
     return lines.map(function (l, idx) {
+      var m = modeOf(l);
+      var mark = docMode && m !== docMode ? '（' + modeLabel(m) + '）' : '';
       return '<tr>' + (withDate ? '<td>' + (idx === 0 ? date.slice(5).replace('-', '/') : '') + '</td><td>' + (idx === 0 ? no : '') + '</td>' : '') +
         '<td>' + esc(l.name) + (l.taxRate === 8 ? ' ※' : '') + '</td><td class="r">' + qtyText(l) + '</td>' +
-        '<td class="r">' + unitPriceText(l) + '</td><td class="r">' + yen(l.amount) + '</td></tr>';
+        '<td class="r">' + unitPriceText(l) + mark + '</td><td class="r">' + yen(l.amount) + mark + '</td></tr>';
     }).join('');
   }
 
@@ -661,12 +694,13 @@
       '<div class="head"><div><div class="to">' + esc(c ? c.name : s.customerName) + '　御中</div>' +
       '<p>' + (isOrder ? '下記のとおりご注文を承りました。' : '下記のとおり納品いたします。') + '</p>' +
       '<div>合計金額（税込）<span class="big-total">' + yen(s.totals.total) + '</span></div></div>' +
-      '<div><div class="meta">No. ' + s.no + '<br>' + (isOrder ? '納品予定日 ' : '納品日 ') + jpDate(s.date) + '</div>' + fromBlock() + '</div></div>' +
-      '<table><thead><tr><th>品名</th><th>数量</th><th>単価（税抜）</th><th>金額（税抜）</th></tr></thead><tbody>' +
+      '<div><div class="meta">No. ' + noOf(s) + '<br>' + (isOrder ? '納品予定日 ' : '納品日 ') + jpDate(s.date) + '</div>' + fromBlock() + '</div></div>' +
+      '<table><thead><tr><th>品名</th><th>数量</th><th>単価（' + modeLabel(modeOf(s)) + '）</th><th>金額（' + modeLabel(modeOf(s)) + '）</th></tr></thead><tbody>' +
       lineRows(s.lines, false) + '</tbody></table>' +
-      '<table class="summary"><tbody>' + rateRows(s.totals.byRate) +
-      '<tr><th>小計（税抜）</th><td>' + yen(s.totals.subtotal) + '</td><th>合計（税込）</th><td><b>' + yen(s.totals.total) + '</b></td></tr></tbody></table>' +
-      '<div class="notes">※は軽減税率（8%）対象商品です。<br>お支払い：' + (s.payment === 'cash' ? '現金（納品時）' : '掛け（' + (c ? closingText(c) : '') + '）') +
+      '<table class="summary"><tbody>' + rateRows(s.totals.byRate, modeOf(s)) +
+      '<tr><th>' + (modeOf(s) === 'incl' ? '消費税合計' : '小計（税抜）') + '</th><td>' + yen(modeOf(s) === 'incl' ? s.totals.tax : s.totals.subtotal) +
+      '</td><th>合計（税込）</th><td><b>' + yen(s.totals.total) + '</b></td></tr></tbody></table>' +
+      '<div class="notes">※は軽減税率（8%）対象商品です。<br>お支払い：' + (s.payment === 'cash' ? '現金（納品時）' : (c ? closingText(c).replace(/・税込単価$/, '') : '掛け')) +
       (s.note ? '<br>備考：' + esc(s.note) : '') + '</div>';
     return h;
   }
@@ -677,19 +711,20 @@
     var slips = Store.getSlips().filter(function (s) { return i.slipIds.indexOf(s.id) >= 0; })
       .sort(function (a, b) { return a.date.localeCompare(b.date) || a.no - b.no; });
     var st = settings();
+    var mode = modeOf(c);
     var h = '<h1>請求書</h1>' +
       '<div class="head"><div><div class="to">' + esc(c ? c.name : i.customerName) + '　御中</div>' +
       '<p>' + jpDate(i.periodTo) + '締め分を下記のとおりご請求申し上げます。</p>' +
       '<div>今回御請求額<span class="big-total">' + yen(i.billed) + '</span></div></div>' +
-      '<div><div class="meta">請求書No. ' + i.no + '<br>発行日 ' + jpDate(i.issueDate) + '</div>' + fromBlock() + '</div></div>' +
+      '<div><div class="meta">請求書No. ' + noOf(i) + '<br>発行日 ' + jpDate(i.issueDate) + '</div>' + fromBlock() + '</div></div>' +
       '<table class="summary"><thead><tr><th>前回御請求額</th><th>御入金額</th><th>繰越金額</th><th>今回お買上額（税抜）</th><th>消費税額</th><th>今回御請求額</th></tr></thead>' +
       '<tbody><tr><td>' + yen(i.prevBilled) + '</td><td>' + yen(i.received) + '</td><td>' + yen(i.carry) + '</td><td>' + yen(i.subtotal) +
       '</td><td>' + yen(i.tax) + '</td><td><b>' + yen(i.billed) + '</b></td></tr></tbody></table>' +
-      '<table><thead><tr><th>日付</th><th>伝票No</th><th>品名</th><th>数量</th><th>単価（税抜）</th><th>金額（税抜）</th></tr></thead><tbody>' +
-      slips.map(function (s) { return lineRows(s.lines, true, s.date, s.no); }).join('') +
+      '<table><thead><tr><th>日付</th><th>伝票No</th><th>品名</th><th>数量</th><th>単価（' + modeLabel(mode) + '）</th><th>金額（' + modeLabel(mode) + '）</th></tr></thead><tbody>' +
+      slips.map(function (s) { return lineRows(s.lines, true, s.date, noOf(s), mode); }).join('') +
       (slips.length ? '' : '<tr><td colspan="6">今回お買上はありません</td></tr>') +
       '</tbody></table>' +
-      '<table class="summary"><tbody>' + rateRows(i.byRate) +
+      '<table class="summary"><tbody>' + rateRows(i.byRate, mode) +
       '<tr><th>今回お買上額（税込）</th><td colspan="3"><b>' + yen(i.purchase) + '</b></td></tr></tbody></table>' +
       '<div class="notes">対象期間：' + jpDate(i.periodFrom) + '〜' + jpDate(i.periodTo) + '<br>※は軽減税率（8%）対象商品です。' +
       (st.bankInfo ? '<br>お振込先：' + esc(st.bankInfo).replace(/\n/g, '<br>') : '') + '</div>';
@@ -703,18 +738,18 @@
   // ================= CSV =================
   function exportMonthCsv() {
     var ym = wsDate.slice(0, 7);
-    var rows = [['納品日', '伝票No', '状態', '取引先', '支払', '商品', '税率', '数量', '単位', '単価(税抜)', '金額(税抜)', '伝票合計(税込)', '請求書']];
+    var rows = [['納品日', '伝票No', '状態', '取引先', '支払', '商品', '税率', '数量', '単位', '税抜/税込', '単価', '金額', '伝票合計(税込)', '請求書']];
     Store.getSlips().filter(function (s) { return s.date.slice(0, 7) === ym; })
       .sort(function (a, b) { return a.date.localeCompare(b.date) || a.no - b.no; })
       .forEach(function (s) {
         var invNo = '';
         if (s.invoiceId) {
           var iv = Store.getInvoices().find(function (i) { return i.id === s.invoiceId; });
-          invNo = iv ? iv.no : '';
+          invNo = iv ? noOf(iv) : '';
         }
         s.lines.forEach(function (l) {
-          rows.push([s.date, s.no, STATUS[s.status], s.customerName, PAY[s.payment], l.name, l.taxRate,
-            l.unit === 'g' ? l.qty / 1000 : l.qty, l.unit === 'g' ? 'kg' : '個', l.price, l.amount, s.totals.total, invNo]);
+          rows.push([s.date, noOf(s), STATUS[s.status], s.customerName, PAY[s.payment], l.name, l.taxRate,
+            l.unit === 'g' ? l.qty / 1000 : l.qty, l.unit === 'g' ? 'kg' : '個', modeLabel(modeOf(l)), l.price, l.amount, s.totals.total, invNo]);
         });
       });
     var csv = '﻿' + rows.map(function (r) {

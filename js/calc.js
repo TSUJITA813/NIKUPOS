@@ -202,15 +202,25 @@
     return line.price * line.qty;
   }
 
-  /** 卸伝票・請求書の合計（外税。税率ごとに1回だけ端数処理＝適格請求書のルール） */
+  /**
+   * 卸伝票・請求書の合計（税率ごとに1回だけ端数処理＝適格請求書のルール）
+   * 行の priceMode が 'incl' なら税込単価（内税）、それ以外は税抜単価（外税）。
+   * 返す byRate の amount は税抜の対象額、incl は税込の対象額。
+   */
   function wsTotals(lines, mode) {
-    var groups = {};
+    var g = {};
     lines.forEach(function (l) {
       var amt = l.amount != null ? l.amount : wsLineAmount(l, mode);
-      groups[l.taxRate] = (groups[l.taxRate] || 0) + amt;
+      var x = g[l.taxRate] || (g[l.taxRate] = { excl: 0, incl: 0 });
+      if (l.priceMode === 'incl') x.incl += amt; else x.excl += amt;
     });
-    var byRate = Object.keys(groups).map(Number).sort(function (a, b) { return a - b; }).map(function (rate) {
-      return { rate: rate, amount: groups[rate], tax: Math.floor((groups[rate] * rate) / 100) };
+    var byRate = Object.keys(g).map(Number).sort(function (a, b) { return a - b; }).map(function (rate) {
+      var x = g[rate];
+      var taxExcl = Math.floor((x.excl * rate) / 100);          // 外税：税抜合計 × 税率
+      var taxIncl = Math.floor((x.incl * rate) / (100 + rate)); // 内税：税込合計 × 税率/(100+税率)
+      var amount = x.excl + (x.incl - taxIncl);
+      var tax = taxExcl + taxIncl;
+      return { rate: rate, amount: amount, tax: tax, incl: amount + tax };
     });
     var subtotal = byRate.reduce(function (s, r) { return s + r.amount; }, 0);
     var tax = byRate.reduce(function (s, r) { return s + r.tax; }, 0);
@@ -241,13 +251,18 @@
     return billed - paid;
   }
 
+  /** 取引先の最新の請求書（複数端末で番号が重なっても作成日時で判断） */
+  function latestInvoice(customerId, invoices) {
+    return invoices.filter(function (i) { return i.customerId === customerId; })
+      .sort(function (a, b) { return (a.createdAt || '').localeCompare(b.createdAt || '') || a.no - b.no; }).pop() || null;
+  }
+
   /**
    * 請求書の計算
    * 前回請求額 − 入金額 = 繰越額、繰越額 + 今回お買上額（税込）= 今回請求額
    */
   function buildInvoice(customerId, periodTo, slips, receipts, invoices, mode) {
-    var prev = invoices.filter(function (i) { return i.customerId === customerId; })
-      .sort(function (a, b) { return a.no - b.no; }).pop() || null;
+    var prev = latestInvoice(customerId, invoices);
     var targetSlips = slips.filter(function (s) {
       return s.customerId === customerId && s.status === 'delivered' && s.payment === 'credit' && !s.invoiceId && s.date <= periodTo;
     }).sort(function (a, b) { return a.date.localeCompare(b.date) || a.no - b.no; });
@@ -278,16 +293,40 @@
 
   // ================= 在庫 =================
 
-  /** 在庫数の変化を反映（tracked: 在庫管理する商品IDの集合） */
-  function applyStock(stock, lines, sign, tracked) {
-    var changed = [];
-    lines.forEach(function (l) {
-      if (!l.productId || l.unit === 'open' || !tracked[l.productId]) return;
-      var d = sign * l.qty;
-      stock[l.productId] = (stock[l.productId] || 0) + d;
-      changed.push({ productId: l.productId, name: l.name, delta: d });
+  /**
+   * 在庫数を記録から計算する（複数の端末で同時に販売しても数がずれないよう、数を足し引きして保存せず毎回計算）
+   *  - 在庫の記録(moves)：入荷・加工・廃棄・調整は増減、棚卸は「その時点の実在庫」
+   *  - 店頭の売上：販売で減り、取消で戻る
+   *  - 卸の伝票：納品で減り、納品後の取消で戻る
+   * @param until この日時より前の記録だけで計算（省略時はすべて）
+   */
+  function computeStock(moves, sales, slips, until) {
+    var ev = [];
+    moves.forEach(function (m) {
+      ev.push({ at: m.at, pid: m.productId, d: m.delta || 0, set: m.type === 'count' && m.actual != null ? m.actual : null });
     });
-    return changed;
+    sales.forEach(function (s) {
+      s.lines.forEach(function (l) {
+        if (!l.productId || l.unit === 'open') return;
+        ev.push({ at: s.at, pid: l.productId, d: -l.qty });
+        if (s.void && s.voidAt) ev.push({ at: s.voidAt, pid: l.productId, d: l.qty });
+      });
+    });
+    slips.forEach(function (s) {
+      if (!s.deliveredAt) return;
+      s.lines.forEach(function (l) {
+        ev.push({ at: s.deliveredAt, pid: l.productId, d: -l.qty });
+        if (s.status === 'cancelled' && s.cancelledAt) ev.push({ at: s.cancelledAt, pid: l.productId, d: l.qty });
+      });
+    });
+    if (until) ev = ev.filter(function (e) { return e.at < until; });
+    ev.sort(function (a, b) { return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
+    var st = {};
+    ev.forEach(function (e) {
+      if (e.set != null) st[e.pid] = e.set;
+      else st[e.pid] = (st[e.pid] || 0) + e.d;
+    });
+    return st;
   }
 
   /** 引当数：今日以降の予約（未受渡）と卸の受注（未納品） */
@@ -310,7 +349,8 @@
     lastClosingDate: lastClosingDate,
     receivableBalance: receivableBalance,
     buildInvoice: buildInvoice,
-    applyStock: applyStock,
+    computeStock: computeStock,
+    latestInvoice: latestInvoice,
     allocated: allocated,
     roundBy: roundBy,
     lineBase: lineBase,

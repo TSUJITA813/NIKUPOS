@@ -28,6 +28,7 @@
         <button class="tab" data-view="products">商品</button>
         <button class="tab" data-view="settings">設定</button>
       </nav>
+      <button class="sync-dot" id="syncDot" hidden aria-label="同期の状態"></button>
       <div class="clock" id="clock"></div>
     </header>
 
@@ -168,6 +169,9 @@
           <button class="btn primary" type="submit">保存</button>
         </form>
 
+        <h2>複数の端末で共有（クラウド同期）</h2>
+        <div id="syncSettings"></div>
+
         <h2>データ管理</h2>
         <p class="note" id="storageNote"></p>
         <div class="btn-row">
@@ -175,7 +179,7 @@
           <label class="btn">バックアップから復元<input type="file" id="fileRestore" accept="application/json,.json" hidden></label>
           <button class="btn danger-outline" id="btnPurge">古い売上を削除…</button>
         </div>
-        <p class="note">データはこの端末のブラウザ内にだけ保存されます。定期的にバックアップを保存してください。</p>
+        <p class="note" id="dataNote"></p>
         <p class="note" id="installNote"></p>
       </div>
     </main>
@@ -196,6 +200,7 @@
   <script src="js/calc.js"></script>
   <script src="js/store.js"></script>
   <script src="js/scale.js"></script>
+  <script src="js/sync.js"></script>
   <script src="js/inventory.js"></script>
   <script src="js/wholesale.js"></script>
   <script src="js/app.js"></script>

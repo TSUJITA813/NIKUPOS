@@ -436,3 +436,19 @@ tr.void td.act { text-decoration: none; }
 @media (max-width: 400px) {
   .tab { padding: 8px 6px; font-size: 14px; }
 }
+
+/* ---------- 同期の状態 ---------- */
+.sync-dot {
+  flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.85);
+  background: #6fd08c; padding: 0; cursor: pointer;
+}
+.sync-dot[hidden] { display: none; }
+.sync-dot.syncing { background: #8cc8ff; animation: pulse 1s infinite alternate; }
+.sync-dot.pending { background: #ffd27a; }
+.sync-dot.offline { background: #b9b1ab; }
+.sync-dot.error { background: #ff6b5b; }
+@keyframes pulse { from { opacity: .5; } to { opacity: 1; } }
+.sync-box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; max-width: 560px; }
+.sync-box .form { margin-top: 8px; }
+.sync-state { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.sync-state .sync-dot { border-color: var(--line); cursor: default; }

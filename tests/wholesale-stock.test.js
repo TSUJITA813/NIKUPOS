@@ -13,7 +13,7 @@ test('卸の合計は税率ごとに1回だけ端数処理（外税）', () => {
     { taxRate: 8, amount: 999 }, { taxRate: 8, amount: 999 }, { taxRate: 10, amount: 55 }
   ]);
   // 行ごとに切り捨てると 79+79=158 だが、合算 1998×8% = 159.84 → 159
-  assert.deepEqual(t.byRate, [{ rate: 8, amount: 1998, tax: 159 }, { rate: 10, amount: 55, tax: 5 }]);
+  assert.deepEqual(t.byRate, [{ rate: 8, amount: 1998, tax: 159, incl: 2157 }, { rate: 10, amount: 55, tax: 5, incl: 60 }]);
   assert.equal(t.subtotal, 2053);
   assert.equal(t.tax, 164);
   assert.equal(t.total, 2217);
@@ -63,15 +63,43 @@ test('請求書：前回請求・入金・繰越・今回お買上・今回請�
   assert.equal(inv.billed, 18900);
 });
 
-test('在庫の増減は在庫管理する商品だけ', () => {
-  const stock = { a: 1000 };
-  const changed = Calc.applyStock(stock, [
-    { productId: 'a', unit: 'g', qty: 350, name: 'A' },
-    { productId: 'b', unit: 'pc', qty: 2, name: 'B' },
-    { productId: 'c', unit: 'open', qty: 1, name: 'C' }
-  ], -1, { a: true, c: true });
-  assert.deepEqual(stock, { a: 650 });
-  assert.equal(changed.length, 1);
+test('在庫は記録から計算：入荷・販売・取消・卸納品・棚卸', () => {
+  const moves = [
+    { at: '2026-11-12T01:00:00.000Z', productId: 'a', delta: 10000 },             // 入荷 10kg
+    { at: '2026-11-12T05:00:00.000Z', productId: 'a', type: 'count', actual: 7000, delta: 0 } // 棚卸で 7kg
+  ];
+  const sales = [
+    { at: '2026-11-12T02:00:00.000Z', lines: [{ productId: 'a', unit: 'g', qty: 500 }, { productId: 'x', unit: 'open', qty: 1 }] },
+    { at: '2026-11-12T03:00:00.000Z', void: true, voidAt: '2026-11-12T03:10:00.000Z', lines: [{ productId: 'a', unit: 'g', qty: 300 }] },
+    { at: '2026-11-12T06:00:00.000Z', lines: [{ productId: 'a', unit: 'g', qty: 200 }] }
+  ];
+  const slips = [
+    { status: 'delivered', deliveredAt: '2026-11-12T04:00:00.000Z', lines: [{ productId: 'a', qty: 2000 }] },
+    { status: 'order', lines: [{ productId: 'a', qty: 9999 }] },
+    { status: 'cancelled', deliveredAt: '2026-11-12T06:30:00.000Z', cancelledAt: '2026-11-12T07:00:00.000Z', lines: [{ productId: 'a', qty: 1000 }] }
+  ];
+  assert.deepEqual(Calc.computeStock(moves, sales, slips, '2026-11-12T04:30:00.000Z'), { a: 10000 - 500 - 2000 });
+  // 棚卸(7kg) − 販売200g − 納品1kg + 取消1kg
+  assert.deepEqual(Calc.computeStock(moves, sales, slips), { a: 6800 });
+});
+
+test('税込単価（内税）の卸：税率ごとに1回だけ内税を計算', () => {
+  const t = Calc.wsTotals([
+    { taxRate: 8, amount: 5400, priceMode: 'incl' }, { taxRate: 8, amount: 1001, priceMode: 'incl' }, { taxRate: 10, amount: 110, priceMode: 'incl' }
+  ]);
+  // 6401 × 8/108 = 474.15 → 474
+  assert.deepEqual(t.byRate, [{ rate: 8, amount: 5927, tax: 474, incl: 6401 }, { rate: 10, amount: 100, tax: 10, incl: 110 }]);
+  assert.equal(t.total, 6511);
+  assert.equal(t.subtotal + t.tax, t.total);
+});
+
+test('最新の請求書は作成日時で判断（端末ごとの番号が重なっても）', () => {
+  const inv = Calc.latestInvoice('c1', [
+    { id: 'a', customerId: 'c1', no: 5, createdAt: '2026-10-31T10:00:00Z' },
+    { id: 'b', customerId: 'c1', no: 1, createdAt: '2026-11-30T10:00:00Z' },
+    { id: 'c', customerId: 'c2', no: 9, createdAt: '2026-12-31T10:00:00Z' }
+  ]);
+  assert.equal(inv.id, 'b');
 });
 
 test('引当：今日以降の未受渡の予約と、未納品の卸受注', () => {
