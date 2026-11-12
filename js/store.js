@@ -69,7 +69,7 @@
     deviceCode: ''     // この端末の記号（複数端末で使うとき、番号の頭に付ける）
   };
   // 全端末で共通にする設定（それ以外はこの端末だけの設定）
-  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax'];
+  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct'];
 
   // ---------- localStorage ----------
   function read(key, fallback) {

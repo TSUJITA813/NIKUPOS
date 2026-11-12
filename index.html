@@ -106,6 +106,7 @@
           <span class="spacer"></span>
           <button class="btn small" id="btnPrintReport">精算レポート印刷</button>
           <button class="btn small" id="btnExportCsv">CSV出力</button>
+          <button class="btn small primary" id="btnAccounting">会計ソフトへ書き出す</button>
         </div>
         <div id="salesSummary"></div>
       </div>
@@ -173,6 +174,9 @@
         <h2>複数の端末で共有（クラウド同期）</h2>
         <div id="syncSettings"></div>
 
+        <h2>会計ソフト連携（仕訳の書き出し）</h2>
+        <div id="acctSettings"></div>
+
         <h2>データ管理</h2>
         <p class="note" id="storageNote"></p>
         <div class="btn-row">
@@ -202,6 +206,8 @@
   <script src="js/store.js"></script>
   <script src="js/scale.js"></script>
   <script src="js/sync.js"></script>
+  <script src="js/journal.js"></script>
+  <script src="js/accounting.js"></script>
   <script src="js/inventory.js"></script>
   <script src="js/wholesale.js"></script>
   <script src="js/app.js"></script>
