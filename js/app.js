@@ -1,7 +1,7 @@
 /*
  * NIKUPOS 画面ロジック
  */
-(function () {
+Store.init().then(function () {
   'use strict';
 
   // ================= 状態 =================
@@ -22,7 +22,7 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  function yen(n) { return '¥' + Number(n || 0).toLocaleString('ja-JP'); }
+  function yen(n) { n = Number(n || 0); return (n < 0 ? '-¥' : '¥') + Math.abs(n).toLocaleString('ja-JP'); }
   function num(n) { return Number(n || 0).toLocaleString('ja-JP'); }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function localDate(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -71,7 +71,8 @@
     if (name === 'sales') renderSales();
     if (name === 'products') renderProductList();
     if (name === 'settings') renderSettings();
-    updateResvBadge();
+    if (POS.views[name]) POS.views[name]();
+    refreshBadges();
   }
 
   function tick() {
@@ -92,6 +93,7 @@
     modalBody.innerHTML = html;
     modalBody.onclick = onClick || null;
     modalBody.oninput = null;
+    modalBody.onchange = null;
     modalCloseable = closeable !== false;
     $('toast').hidden = true;
     modal.hidden = false;
@@ -107,6 +109,7 @@
     modalBody.innerHTML = '';
     modalBody.onclick = null;
     modalBody.oninput = null;
+    modalBody.onchange = null;
   }
 
   // 外付けキーボード・キーボード型はかりでの入力（数字・Backspace・Enter・Esc）
@@ -690,9 +693,8 @@
       customer: cart.customer || '',
       void: false
     };
-    var sales = Store.getSales();
-    sales.push(sale);
-    if (!Store.saveSales(sales)) return;
+    Store.addSale(sale);
+    stockChange(sale.lines, -1);
     if (sale.reservationId) {
       var list = Store.getReservations();
       var r = list.find(function (x) { return x.id === sale.reservationId; });
@@ -780,7 +782,7 @@
 
   // ================= 売上画面 =================
   function summarize(date) {
-    return Calc.summarizeDay(Store.getSales(), Store.getReservations(), date);
+    return Calc.summarizeDay(Store.getSales(), Store.getReservations(), date, { slips: Store.getSlips(), receipts: Store.getReceipts() });
   }
 
   function payLabel(x) {
@@ -797,7 +799,7 @@
     $('salesDate').value = salesDate;
     var s = summarize(salesDate);
     var h = '<div class="cards">';
-    h += card('売上合計', yen(s.total));
+    h += card('店頭の売上合計', yen(s.total));
     h += card('客数', s.count + '件');
     h += card('客単価', yen(s.count ? Math.round(s.total / s.count) : 0));
     h += card('現金', yen(s.cash) + (s.cash < 0 ? '<div class="note">前受金の差額返金を含む</div>' : ''));
@@ -808,7 +810,11 @@
     var dOut = s.depositRefund.cash + s.depositRefund.cashless;
     if (dIn) h += card('前受金の受取', yen(dIn) + '<div class="note">現金 ' + yen(s.depositIn.cash) + '</div>');
     if (dOut) h += card('前受金の返金', yen(dOut) + '<div class="note">現金 ' + yen(s.depositRefund.cash) + '</div>');
-    h += card('レジ内現金の増減', yen(s.drawerCash) + '<div class="note">現金売上＋前受金−返金</div>');
+    var w = s.wholesale;
+    if (w.count) h += card('卸の納品（税込）', yen(w.total) + '<div class="note">' + w.count + '件・うち掛け ' + yen(w.credit) + '</div>');
+    if (w.cashOnDelivery || w.receiptCash) h += card('卸の現金回収', yen(w.cashOnDelivery + w.receiptCash));
+    if (w.receiptOther) h += card('卸の振込などの入金', yen(w.receiptOther));
+    h += card('レジ内現金の増減', yen(s.drawerCash) + '<div class="note">現金売上＋前受金−返金＋卸の現金回収</div>');
     Object.keys(s.rates).sort(function (a, b) { return a - b; }).forEach(function (r) {
       h += card(r + '%対象（内税）', yen(s.rates[r].amount) + '<div class="note">税 ' + yen(s.rates[r].tax) + '</div>');
     });
@@ -873,12 +879,12 @@
         if (b.dataset.act === 'close') closeModal();
         if (b.dataset.act === 'reprint') printReceipt(sale, true);
         if (b.dataset.act === 'void') {
-          if (!confirm('取引No.' + sale.no + '（' + yen(sale.totals.total) + '）を取り消しますか？\n返金は手作業で行ってください。' + (sale.reservationId ? '\n予約は「予約中」に戻ります。' : ''))) return;
-          var sales = Store.getSales();
-          var x = sales.find(function (y) { return y.id === sale.id; });
+          if (!confirm('取引No.' + sale.no + '（' + yen(sale.totals.total) + '）を取り消しますか？\n返金は手作業で行ってください。在庫は元に戻ります。' + (sale.reservationId ? '\n予約は「予約中」に戻ります。' : ''))) return;
+          var x = Store.getSales().find(function (y) { return y.id === sale.id; });
           x.void = true;
           x.voidAt = new Date().toISOString();
-          Store.saveSales(sales);
+          Store.updateSale(x);
+          stockChange(x.lines, 1);
           if (x.reservationId) {
             var rl = Store.getReservations();
             var rr = rl.find(function (y) { return y.id === x.reservationId; });
@@ -900,7 +906,11 @@
     h += '<hr>' + row('現金', yen(s.cash)) + row('キャッシュレス', yen(s.cashless)) + row('前受金から充当', yen(s.depositUsed)) +
       row('値引き合計', yen(s.discount)) + row('取消', s.voids + '件');
     h += '<hr>' + row('前受金の受取（現金）', yen(s.depositIn.cash)) + row('前受金の受取（キャッシュレス）', yen(s.depositIn.cashless)) +
-      row('前受金の返金（現金）', yen(s.depositRefund.cash)) + row('<b>レジ内現金の増減</b>', '<b>' + yen(s.drawerCash) + '</b>');
+      row('前受金の返金（現金）', yen(s.depositRefund.cash));
+    h += '<hr>' + row('卸の納品（税込）', yen(s.wholesale.total) + '（' + s.wholesale.count + '件）') +
+      row('卸の現金回収', yen(s.wholesale.cashOnDelivery + s.wholesale.receiptCash)) +
+      row('卸の振込などの入金', yen(s.wholesale.receiptOther));
+    h += '<hr>' + row('<b>レジ内現金の増減</b>', '<b>' + yen(s.drawerCash) + '</b>');
     h += '<hr>';
     Object.keys(s.rates).sort(function (a, b) { return a - b; }).forEach(function (r) {
       h += row(r + '%対象', yen(s.rates[r].amount)) + row('　内消費税', yen(s.rates[r].tax));
@@ -967,7 +977,9 @@
       list.forEach(function (p, i) {
         h += '<div class="plist-item"><span class="sw" style="background:' + esc(p.color) + '"></span>' +
           '<div class="info"><div class="n">' + esc(p.name) + '</div><div class="d">' +
-          UNIT_LABEL[p.unit] + (p.unit === 'open' ? '' : ' ' + yen(p.price)) + '・税率' + p.taxRate + '%</div></div>' +
+          UNIT_LABEL[p.unit] + (p.unit === 'open' ? '' : ' ' + yen(p.price)) + '・税率' + p.taxRate + '%' +
+          (p.wsPrice ? '・卸 ' + yen(p.wsPrice) + (p.unit === 'g' ? '/kg' : '/個') : '') +
+          (p.trackStock ? '・在庫管理' : '') + '</div></div>' +
           '<button class="btn" data-move="-1" data-id="' + p.id + '"' + (i === 0 ? ' disabled' : '') + ' aria-label="上へ">▲</button>' +
           '<button class="btn" data-move="1" data-id="' + p.id + '"' + (i === list.length - 1 ? ' disabled' : '') + ' aria-label="下へ">▼</button>' +
           '<button class="btn" data-edit="' + p.id + '">編集</button></div>';
@@ -1013,6 +1025,10 @@
       '<button type="button" class="btn small" data-unit="pc">個数売り</button>' +
       '<button type="button" class="btn small" data-unit="open">金額入力</button></div></label>' +
       '<label id="pPriceLabel"><span id="pPriceText"></span><input name="price" type="number" inputmode="numeric" min="0" step="1" value="' + esc(d.price) + '"></label>' +
+      '<label id="pWsLabel"><span id="pWsText"></span><input name="wsPrice" type="number" inputmode="numeric" min="0" step="1" value="' + esc(d.wsPrice || '') + '" placeholder="卸をしない商品は空欄"></label>' +
+      '<label class="check" id="pTrackLabel"><input type="checkbox" name="trackStock"' + (d.trackStock ? ' checked' : '') + '> 在庫を管理する</label>' +
+      '<label id="pMinLabel"><span id="pMinText"></span><input name="minStock" type="text" inputmode="decimal" value="' +
+      (d.minStock ? (d.unit === 'g' ? d.minStock / 1000 : d.minStock) : '') + '" placeholder="例：' + (d.unit === 'g' ? '2' : '10') + '"></label>' +
       '<label>税率<div class="seg" id="pTax">' +
       '<button type="button" class="btn small" data-tax="8">8%（食品・持ち帰り）</button>' +
       '<button type="button" class="btn small" data-tax="10">10%（レジ袋など）</button></div></label>' +
@@ -1045,6 +1061,10 @@
           d.name = name;
           d.category = f.elements.category.value;
           d.price = d.unit === 'open' ? 0 : price;
+          d.wsPrice = d.unit === 'open' ? 0 : Math.floor(Number(f.elements.wsPrice.value || 0));
+          d.trackStock = d.unit !== 'open' && f.elements.trackStock.checked;
+          var minv = parseFloat(f.elements.minStock.value || '0') || 0;
+          d.minStock = d.unit === 'g' ? Math.round(minv * 1000) : Math.round(minv);
           if (isNew) {
             d.id = 'p' + Date.now();
             d.order = products.reduce(function (m, x) { return Math.max(m, x.order); }, 0) + 1;
@@ -1066,6 +1086,12 @@
       modalBody.querySelectorAll('[data-color]').forEach(function (x) { x.classList.toggle('on', x.dataset.color === d.color); });
       $('pPriceLabel').style.display = d.unit === 'open' ? 'none' : '';
       $('pPriceText').textContent = d.unit === 'g' ? '単価（100gあたり・税込・円）' : '単価（1個あたり・税込・円）';
+      var open = d.unit === 'open';
+      $('pWsLabel').style.display = open ? 'none' : '';
+      $('pTrackLabel').style.display = open ? 'none' : '';
+      $('pMinLabel').style.display = open ? 'none' : '';
+      $('pWsText').textContent = d.unit === 'g' ? '卸単価（1kgあたり・税抜・円）' : '卸単価（1個あたり・税抜・円）';
+      $('pMinText').textContent = '発注点：在庫がこれを下回ったら知らせる（' + (d.unit === 'g' ? 'kg' : '個') + '）';
     }
     draw();
   }
@@ -1447,11 +1473,17 @@
   // ================= 設定 =================
   function renderSettings() {
     var f = $('settingsForm');
-    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit'].forEach(function (k) { f.elements[k].value = settings[k]; });
+    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo'].forEach(function (k) { f.elements[k].value = settings[k]; });
     f.elements.categories.value = settings.categories.join(',');
     f.autoPrint.checked = !!settings.autoPrint;
-    var kb = Math.round(Store.usageBytes() / 1024);
-    $('storageNote').textContent = '保存中の売上：' + Store.getSales().length + '件（約' + num(kb) + 'KB）';
+    var counts = '店頭の売上 ' + num(Store.getSales().length) + '件・予約 ' + num(Store.getReservations().length) +
+      '件・卸伝票 ' + num(Store.getSlips().length) + '件・在庫履歴 ' + num(Store.getMoves().length) + '件';
+    $('storageNote').textContent = counts + (Store.usingIndexedDB() ? '' : '（※この端末では簡易保存モードで動作中。容量が小さいため、こまめにバックアップしてください）');
+    Store.estimate().then(function (e) {
+      if (!e || e.usage == null || !Store.usingIndexedDB()) return;
+      var mb = function (v) { return (Math.round(v / 1024 / 1024 * 10) / 10).toLocaleString('ja-JP'); };
+      $('storageNote').textContent = counts + '（使用量 約' + mb(e.usage) + 'MB' + (e.quota ? '／上限の目安 約' + num(Math.round(e.quota / 1024 / 1024)) + 'MB' : '') + '）';
+    });
     $('installNote').innerHTML = installHint();
     renderScaleSettings();
   }
@@ -1493,7 +1525,7 @@
   $('settingsForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var f = this;
-    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit'].forEach(function (k) { settings[k] = f.elements[k].value.trim(); });
+    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo'].forEach(function (k) { settings[k] = f.elements[k].value.trim(); });
     settings.categories = f.elements.categories.value.split(/[,、，]/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!settings.categories.length) settings.categories = ['その他'];
     settings.autoPrint = f.autoPrint.checked;
@@ -1511,20 +1543,17 @@
     var file = this.files[0];
     this.value = '';
     if (!file) return;
-    if (!confirm('現在のデータ（商品・設定・売上）をバックアップの内容で置き換えます。よろしいですか？')) return;
+    if (!confirm('現在のデータ（商品・設定・売上・予約・卸・在庫）をバックアップの内容で置き換えます。よろしいですか？')) return;
     var reader = new FileReader();
     reader.onload = function () {
-      try {
-        Store.importAll(JSON.parse(reader.result));
-        products = Store.getProducts();
-        settings = Store.getSettings();
-        applyStoreName();
-        renderSettings();
-        updateResvBadge();
-        toast('復元しました');
-      } catch (err) {
+      var data;
+      try { data = JSON.parse(reader.result); } catch (err) { alert('復元できませんでした：ファイルを読み取れません'); return; }
+      Store.importAll(data).then(function () {
+        alert('復元しました。アプリを再読み込みします。');
+        location.reload();
+      }).catch(function (err) {
         alert('復元できませんでした：' + err.message);
-      }
+      });
     };
     reader.readAsText(file);
   });
@@ -1535,12 +1564,10 @@
     var input = prompt('この日付より前の売上を削除します（YYYY-MM-DD）。\n先にバックアップを保存することをおすすめします。', localDate(d));
     if (!input) return;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) { alert('日付の形式が正しくありません'); return; }
-    var sales = Store.getSales();
-    var keep = sales.filter(function (s) { return s.date >= input; });
-    var removed = sales.length - keep.length;
+    var removed = Store.getSales().filter(function (s) { return s.date < input; }).length;
     if (!removed) { alert('削除対象の売上はありません'); return; }
     if (!confirm(removed + '件の売上を削除します。元に戻せません。よろしいですか？')) return;
-    Store.saveSales(keep);
+    Store.removeSalesBefore(input);
     renderSettings();
     toast(removed + '件削除しました');
   });
@@ -1562,14 +1589,71 @@
     document.title = (settings.storeName ? settings.storeName + ' - ' : '') + 'NIKUPOS';
   }
 
+  // ================= 在庫の増減（店頭・卸・在庫画面で共通） =================
+  function trackedMap() {
+    var m = {};
+    products.forEach(function (p) { if (p.trackStock) m[p.id] = true; });
+    return m;
+  }
+  /**
+   * 在庫を増減する。move を渡すと在庫履歴に残す。
+   * 店頭販売は件数が多いので履歴には残さない（売上データから集計できる）。
+   */
+  var moveSeq = 0;
+  function stockChange(lines, sign, move) {
+    var stock = Store.getStock();
+    var changed = Calc.applyStock(stock, lines, sign, trackedMap());
+    if (!changed.length) return changed;
+    Store.saveStock(stock);
+    if (move) {
+      var at = new Date();
+      Store.addMoves(changed.map(function (c) {
+        return {
+          id: 'M' + at.getTime() + '-' + (moveSeq++), at: at.toISOString(), date: localDate(at),
+          type: move.type, productId: c.productId, name: c.name, delta: c.delta, after: stock[c.productId],
+          cost: move.cost || null, supplier: move.supplier || '', ref: move.ref || '', note: move.note || ''
+        };
+      }));
+    }
+    refreshBadges();
+    return changed;
+  }
+
+  var badgeFns = [updateResvBadge];
+  function refreshBadges() { badgeFns.forEach(function (f) { f(); }); }
+
+  /** A4 の帳票（納品書・請求書）を印刷 */
+  function printDoc(html) {
+    $('printArea').innerHTML = '<div class="doc">' + html + '</div>';
+    setTimeout(function () { window.print(); }, 50);
+  }
+
+  var POS = {
+    $: $, esc: esc, yen: yen, num: num, localDate: localDate, timeStr: timeStr, dateTimeStr: dateTimeStr, weekday: weekday,
+    round: round, toast: toast, isNarrow: isNarrow, row: row, card: card, priceLabel: priceLabel,
+    openModal: openModal, closeModal: closeModal, modalBody: modalBody,
+    printHtml: printHtml, printDoc: printDoc, saveFile: saveFile,
+    products: function () { return products; },
+    settings: function () { return settings; },
+    saveProducts: function () { Store.saveProducts(products); },
+    categories: categories,
+    stockChange: stockChange,
+    trackedMap: trackedMap,
+    views: {},
+    addBadge: function (f) { badgeFns.push(f); },
+    refreshBadges: refreshBadges,
+    showView: showView
+  };
+  (window.NIKUPOS_MODULES || []).forEach(function (init) { init(POS); });
+
   // ================= 起動 =================
   applyStoreName();
   tick();
   setInterval(tick, 10000);
   currentCat = '__all';
   renderRegister();
-  updateResvBadge();
-  setInterval(updateResvBadge, 60000);
+  refreshBadges();
+  setInterval(refreshBadges, 60000);
 
   // ブラウザにデータを消されにくくする（対応ブラウザのみ）
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
@@ -1577,4 +1661,7 @@
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
     navigator.serviceWorker.register('sw.js').catch(function () {});
   }
-})();
+}).catch(function (err) {
+  console.error(err);
+  alert('NIKUPOSを起動できませんでした：' + (err && err.message));
+});

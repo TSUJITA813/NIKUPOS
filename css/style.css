@@ -366,3 +366,73 @@ tr.void td.act { text-decoration: none; }
   .tab-badge { min-width: 17px; height: 17px; font-size: 11px; margin-left: 2px; padding: 0 4px; }
   .page { padding-left: 12px; padding-right: 12px; }
 }
+
+/* ---------- タブが多いので、狭い画面では横スクロール ---------- */
+.tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; min-width: 0; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab-badge.warn { background: #ffd27a; color: #5a3b00; }
+@media (max-width: 759px) {
+  .brand { flex: none; }
+  .tabs { margin-left: 4px; }
+}
+
+/* ---------- 卸・在庫 ---------- */
+.subtabs { display: flex; gap: 6px; margin: 4px 0 10px; overflow-x: auto; }
+.subtabs .btn { flex: none; border-radius: 999px; min-height: 42px; }
+.list-item {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px; margin-bottom: 8px;
+}
+.list-item.dim { opacity: .6; }
+.li-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.li-title { font-size: 17px; font-weight: 700; }
+.li-sub { color: var(--muted); font-size: 14px; }
+.li-amt { margin-left: auto; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+.pill.ok { background: #e7f1ea; color: var(--ok); }
+.pill.gray { background: #eee; color: var(--muted); }
+.pill.warn { background: #fff1d6; color: #8a5a00; }
+.list-item .btn-row { margin: 8px 0 0; }
+.list-item .btn-row .btn { min-height: 40px; }
+.neg { color: var(--danger); }
+.low { color: #8a5a00; font-weight: 700; }
+.wsline { display: grid; grid-template-columns: 1fr 96px 100px 36px; gap: 6px; align-items: center; margin-bottom: 6px; }
+.wsline .rname { font-weight: 600; color: var(--ink); font-size: 15px; }
+.wsline .rname small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+.wsline input { min-height: 42px !important; text-align: right; padding: 6px 8px !important; }
+.wsline button { min-height: 42px; border: 1px solid var(--line); border-radius: 8px; background: #faf8f6; font-size: 18px; color: var(--danger); }
+.wsline-head { display: grid; grid-template-columns: 1fr 96px 100px 36px; gap: 6px; font-size: 12px; color: var(--muted); }
+.wsline-head span { text-align: right; }
+.wsline-head span:first-child { text-align: left; }
+.tot-box { margin-top: 8px; padding: 8px 12px; background: #faf8f6; border-radius: 8px; }
+.tot-box .sum-row { font-size: 14px; }
+.tot-box .sum-row.total { font-size: 22px; }
+@media (max-width: 400px) {
+  .wsline, .wsline-head { grid-template-columns: 1fr 78px 84px 32px; }
+}
+
+/* ---------- A4 帳票（納品書・請求書） ---------- */
+.doc { font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif; color: #000; font-size: 11pt; padding: 14mm 14mm; width: 210mm; box-sizing: border-box; }
+.doc h1 { text-align: center; font-size: 20pt; letter-spacing: .5em; margin: 0 0 8mm; font-weight: 700; }
+.doc .head { display: flex; justify-content: space-between; gap: 10mm; margin-bottom: 6mm; }
+.doc .to { font-size: 15pt; border-bottom: 1px solid #000; padding-bottom: 2px; min-width: 80mm; }
+.doc .from { text-align: right; font-size: 10pt; line-height: 1.6; }
+.doc .from .name { font-size: 13pt; font-weight: 700; }
+.doc .meta { font-size: 10pt; text-align: right; margin-bottom: 2mm; }
+.doc table { width: 100%; border-collapse: collapse; font-size: 10pt; margin: 3mm 0; }
+.doc th, .doc td { border: 1px solid #000; padding: 4px 6px; white-space: normal; color: #000; }
+.doc th { background: #eee; font-weight: 700; text-align: center; }
+.doc td.r { text-align: right; }
+.doc .big-total { display: inline-block; border-bottom: 2px solid #000; font-size: 15pt; padding: 2px 8px; margin: 2mm 0 4mm; }
+.doc .summary td { text-align: right; }
+.doc .summary th { width: auto; }
+.doc .notes { font-size: 9.5pt; margin-top: 4mm; line-height: 1.6; }
+.doc .slip-sep { page-break-inside: avoid; }
+
+@media (max-width: 759px) {
+  .tab { padding: 8px 8px; }
+  .hide-narrow { display: none; }
+}
+@media (max-width: 400px) {
+  .tab { padding: 8px 6px; font-size: 14px; }
+}

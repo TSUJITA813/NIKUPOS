@@ -22,6 +22,8 @@
       <nav class="tabs" role="tablist">
         <button class="tab active" data-view="register">レジ</button>
         <button class="tab" data-view="reservations">予約<span class="tab-badge" id="resvBadge" hidden></span></button>
+        <button class="tab" data-view="wholesale">卸<span class="tab-badge" id="wsBadge" hidden></span></button>
+        <button class="tab" data-view="inventory">在庫<span class="tab-badge warn" id="invBadge" hidden></span></button>
         <button class="tab" data-view="sales">売上</button>
         <button class="tab" data-view="products">商品</button>
         <button class="tab" data-view="settings">設定</button>
@@ -83,6 +85,16 @@
       </div>
     </main>
 
+    <!-- 卸（飲食店などへの販売） -->
+    <main id="view-wholesale" class="view">
+      <div class="page" id="wsRoot"></div>
+    </main>
+
+    <!-- 在庫 -->
+    <main id="view-inventory" class="view">
+      <div class="page" id="invRoot"></div>
+    </main>
+
     <!-- 売上 -->
     <main id="view-sales" class="view">
       <div class="page">
@@ -120,6 +132,7 @@
           <label>電話番号<input name="tel" inputmode="tel" autocomplete="off"></label>
           <label>インボイス登録番号<input name="invoiceNo" placeholder="T1234567890123" autocomplete="off"></label>
           <label>レシート末尾メッセージ<textarea name="footer" rows="2"></textarea></label>
+          <label>振込先（卸の請求書に記載）<textarea name="bankInfo" rows="2" placeholder="例：○○銀行 △△支店 普通 1234567 ﾄﾘﾆｸﾉﾐｾ"></textarea></label>
           <label>商品カテゴリ（カンマ区切り）<input name="categories" autocomplete="off"></label>
           <label>グラム売りの端数処理
             <select name="rounding">
@@ -183,6 +196,8 @@
   <script src="js/calc.js"></script>
   <script src="js/store.js"></script>
   <script src="js/scale.js"></script>
+  <script src="js/inventory.js"></script>
+  <script src="js/wholesale.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

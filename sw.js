@@ -1,5 +1,5 @@
 // オフライン用キャッシュ。ファイルを更新したら VERSION を上げる
-var VERSION = 'nikupos-v2';
+var VERSION = 'nikupos-v3';
 var FILES = [
   './',
   'index.html',
@@ -7,6 +7,8 @@ var FILES = [
   'js/calc.js',
   'js/store.js',
   'js/scale.js',
+  'js/inventory.js',
+  'js/wholesale.js',
   'js/app.js',
   'manifest.webmanifest',
   'icons/icon.svg',

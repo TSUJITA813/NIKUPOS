@@ -138,13 +138,17 @@
     return { count: count, items: order.map(function (k) { return map[k]; }) };
   }
 
-  /** 日別集計（レジ内現金の増減を含む） */
-  function summarizeDay(sales, reservations, date) {
+  /**
+   * 日別集計（レジ内現金の増減を含む）
+   * @param ws 卸のデータ { slips, receipts }（省略可）
+   */
+  function summarizeDay(sales, reservations, date, ws) {
     var daySales = sales.filter(function (s) { return s.date === date; });
     var sum = {
       sales: daySales, count: 0, total: 0, cash: 0, cashless: 0, depositUsed: 0, discount: 0, voids: 0,
       rates: {}, items: {},
-      depositIn: { cash: 0, cashless: 0 }, depositRefund: { cash: 0, cashless: 0 }, drawerCash: 0
+      depositIn: { cash: 0, cashless: 0 }, depositRefund: { cash: 0, cashless: 0 }, drawerCash: 0,
+      wholesale: { count: 0, total: 0, credit: 0, cashOnDelivery: 0, receiptCash: 0, receiptOther: 0 }
     };
     daySales.forEach(function (s) {
       if (s.void) { sum.voids++; return; }
@@ -173,11 +177,141 @@
       if (r.depositDate === date) sum.depositIn[m] += r.deposit;
       if (r.depositRefundDate === date) sum.depositRefund[m] += r.deposit;
     });
-    sum.drawerCash = sum.cash + sum.depositIn.cash - sum.depositRefund.cash;
+    var w = sum.wholesale;
+    if (ws) {
+      (ws.slips || []).forEach(function (s) {
+        if (s.date !== date || s.status !== 'delivered') return;
+        w.count++;
+        w.total += s.totals.total;
+        if (s.payment === 'cash') w.cashOnDelivery += s.totals.total; else w.credit += s.totals.total;
+      });
+      (ws.receipts || []).forEach(function (r) {
+        if (r.date !== date) return;
+        if (r.method === 'cash') w.receiptCash += r.amount; else w.receiptOther += r.amount;
+      });
+    }
+    sum.drawerCash = sum.cash + sum.depositIn.cash - sum.depositRefund.cash + w.cashOnDelivery + w.receiptCash;
     return sum;
   }
 
+  // ================= 卸 =================
+  // 卸の単価は税抜。グラム売りは 1kg あたり、個数売りは 1個あたり。数量は g または 個。
+
+  function wsLineAmount(line, mode) {
+    if (line.unit === 'g') return roundBy((line.price * line.qty) / 1000, mode);
+    return line.price * line.qty;
+  }
+
+  /** 卸伝票・請求書の合計（外税。税率ごとに1回だけ端数処理＝適格請求書のルール） */
+  function wsTotals(lines, mode) {
+    var groups = {};
+    lines.forEach(function (l) {
+      var amt = l.amount != null ? l.amount : wsLineAmount(l, mode);
+      groups[l.taxRate] = (groups[l.taxRate] || 0) + amt;
+    });
+    var byRate = Object.keys(groups).map(Number).sort(function (a, b) { return a - b; }).map(function (rate) {
+      return { rate: rate, amount: groups[rate], tax: Math.floor((groups[rate] * rate) / 100) };
+    });
+    var subtotal = byRate.reduce(function (s, r) { return s + r.amount; }, 0);
+    var tax = byRate.reduce(function (s, r) { return s + r.tax; }, 0);
+    return { byRate: byRate, subtotal: subtotal, tax: tax, total: subtotal + tax };
+  }
+
+  /** 締め日（1〜28、31=月末）から、基準日以前で直近の締め日を求める */
+  function lastClosingDate(baseDate, closingDay) {
+    var p = baseDate.split('-').map(Number);
+    function closing(y, m) { // m: 1-12
+      var last = new Date(y, m, 0).getDate();
+      var d = closingDay >= 29 ? last : Math.min(closingDay, last);
+      return y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+    }
+    var c = closing(p[0], p[1]);
+    if (c <= baseDate) return c;
+    return p[1] === 1 ? closing(p[0] - 1, 12) : closing(p[0], p[1] - 1);
+  }
+
+  /** 売掛金の残高（掛けで納品した額 − 入金額） */
+  function receivableBalance(customerId, slips, receipts) {
+    var billed = 0;
+    slips.forEach(function (s) {
+      if (s.customerId === customerId && s.status === 'delivered' && s.payment === 'credit') billed += s.totals.total;
+    });
+    var paid = 0;
+    receipts.forEach(function (r) { if (r.customerId === customerId) paid += r.amount; });
+    return billed - paid;
+  }
+
+  /**
+   * 請求書の計算
+   * 前回請求額 − 入金額 = 繰越額、繰越額 + 今回お買上額（税込）= 今回請求額
+   */
+  function buildInvoice(customerId, periodTo, slips, receipts, invoices, mode) {
+    var prev = invoices.filter(function (i) { return i.customerId === customerId; })
+      .sort(function (a, b) { return a.no - b.no; }).pop() || null;
+    var targetSlips = slips.filter(function (s) {
+      return s.customerId === customerId && s.status === 'delivered' && s.payment === 'credit' && !s.invoiceId && s.date <= periodTo;
+    }).sort(function (a, b) { return a.date.localeCompare(b.date) || a.no - b.no; });
+    var targetReceipts = receipts.filter(function (r) { return r.customerId === customerId && !r.invoiceId && r.date <= periodTo; });
+    var lines = [];
+    targetSlips.forEach(function (s) { s.lines.forEach(function (l) { lines.push(l); }); });
+    var t = wsTotals(lines, mode);
+    var prevBilled = prev ? prev.billed : 0;
+    var received = targetReceipts.reduce(function (s, r) { return s + r.amount; }, 0);
+    var carry = prevBilled - received;
+    return {
+      customerId: customerId,
+      periodFrom: targetSlips.length ? targetSlips[0].date : periodTo,
+      periodTo: periodTo,
+      prevInvoiceId: prev ? prev.id : null,
+      slipIds: targetSlips.map(function (s) { return s.id; }),
+      receiptIds: targetReceipts.map(function (r) { return r.id; }),
+      prevBilled: prevBilled,
+      received: received,
+      carry: carry,
+      byRate: t.byRate,
+      subtotal: t.subtotal,
+      tax: t.tax,
+      purchase: t.total,
+      billed: carry + t.total
+    };
+  }
+
+  // ================= 在庫 =================
+
+  /** 在庫数の変化を反映（tracked: 在庫管理する商品IDの集合） */
+  function applyStock(stock, lines, sign, tracked) {
+    var changed = [];
+    lines.forEach(function (l) {
+      if (!l.productId || l.unit === 'open' || !tracked[l.productId]) return;
+      var d = sign * l.qty;
+      stock[l.productId] = (stock[l.productId] || 0) + d;
+      changed.push({ productId: l.productId, name: l.name, delta: d });
+    });
+    return changed;
+  }
+
+  /** 引当数：今日以降の予約（未受渡）と卸の受注（未納品） */
+  function allocated(reservations, slips, today) {
+    var a = {};
+    function add(it) {
+      if (!it.productId || it.unit === 'open') return;
+      a[it.productId] = (a[it.productId] || 0) + it.qty;
+    }
+    reservations.forEach(function (r) {
+      if (r.date >= today && isActiveReservation(r)) r.items.forEach(add);
+    });
+    slips.forEach(function (s) { if (s.status === 'order') s.lines.forEach(add); });
+    return a;
+  }
+
   var Calc = {
+    wsLineAmount: wsLineAmount,
+    wsTotals: wsTotals,
+    lastClosingDate: lastClosingDate,
+    receivableBalance: receivableBalance,
+    buildInvoice: buildInvoice,
+    applyStock: applyStock,
+    allocated: allocated,
     roundBy: roundBy,
     lineBase: lineBase,
     lineDiscount: lineDiscount,
