@@ -156,4 +156,37 @@ void main() {
     await shot(t, 'tablet_products');
     await t.pump(const Duration(seconds: 3));
   }, skip: !on);
+
+  testWidgets('レジ締め・端末の設定', (t) async {
+    final s = await start(t, const Size(390, 844));
+    s.settings['floatDefault'] = 10000;
+    s.settings['zip'] = '123-4567';
+    s.settings['address'] = '東京都鶏町1-2-3';
+    await tapKey(t, 'product-p11');
+    await tapKey(t, 'payMini');
+    await t.tap(find.byKey(const ValueKey('choice-cashless')));
+    await t.pumpAndSettle();
+    await confirmPay(t);
+    await t.tap(find.text('レシートを見る'));
+    await shot(t, 'phone_receipt');
+    await t.tap(find.text('閉じる'));
+    await tapKey(t, 'nextCustomer');
+    await t.pump(const Duration(seconds: 3));
+    await t.tap(find.byKey(const ValueKey('nav-売上')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('choice-cash')));
+    await shot(t, 'phone_cashmoves');
+    await tapKey(t, 'cm-out');
+    await shot(t, 'phone_cashmove_dialog');
+    await t.tap(find.text('キャンセル'));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('choice-close')));
+    await shot(t, 'phone_closing');
+    await t.drag(find.byType(Scrollable).first, const Offset(0, -700));
+    await shot(t, 'phone_closing2');
+    await t.drag(find.byType(Scrollable).first, const Offset(0, -900));
+    await shot(t, 'phone_closing3');
+    await t.tap(find.byKey(const ValueKey('deviceSettings')));
+    await shot(t, 'phone_device_settings');
+  }, skip: !on);
 }

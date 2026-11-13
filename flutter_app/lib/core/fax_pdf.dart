@@ -10,6 +10,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import 'app_state.dart' show yen;
 import 'calc.dart';
+import 'receipt.dart' show addressLine, logoOf;
 import 'reservation.dart';
 
 const _week = '月火水木金土日';
@@ -23,8 +24,9 @@ String jpDate(String ymd) {
 String _s(Object? v) => (v ?? '').toString();
 
 pw.Widget _storeBlock(Json st, {pw.CrossAxisAlignment align = pw.CrossAxisAlignment.end}) => pw.Column(crossAxisAlignment: align, children: [
+      if (logoOf(st) != null) pw.Padding(padding: const pw.EdgeInsets.only(bottom: 4), child: pw.Image(pw.MemoryImage(logoOf(st)!), height: 40)),
       pw.Text(_s(st['storeName']), style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold)),
-      if (_s(st['address']).isNotEmpty) pw.Text(_s(st['address']), style: const pw.TextStyle(fontSize: 10)),
+      if (addressLine(st).isNotEmpty) pw.Text(addressLine(st), style: const pw.TextStyle(fontSize: 10)),
       if (_s(st['tel']).isNotEmpty) pw.Text('TEL ${st['tel']}', style: const pw.TextStyle(fontSize: 10)),
       if (_s(st['fax']).isNotEmpty) pw.Text('FAX ${st['fax']}', style: const pw.TextStyle(fontSize: 10)),
       if (_s(st['invoiceNo']).isNotEmpty) pw.Text('登録番号 ${st['invoiceNo']}', style: const pw.TextStyle(fontSize: 9)),

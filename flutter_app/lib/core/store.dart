@@ -100,7 +100,7 @@ String nowIso() {
 
 /// 全端末で共通にする設定（Web版の SHARED_SETTINGS と同じ＋FAX番号）。それ以外は端末ごと
 const sharedSettings = [
-  'storeName', 'address', 'tel', 'fax', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct',
+  'storeName', 'zip', 'address', 'tel', 'fax', 'invoiceNo', 'logo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct',
   'cashlessTypes', 'promos', 'staff', 'permissions', 'fixedCosts', 'admins', 'adminRecovery',
 ];
 
@@ -120,7 +120,7 @@ class Store {
   void Function(String col, List<String> ids)? onLocalChange;
 
   /// この端末で使う種類。ほかの種類（Web版の卸・在庫など）も、届いたらそのまま保存しておく
-  static const collections = ['sales', 'logs', 'cashmoves', 'reservations'];
+  static const collections = ['sales', 'logs', 'cashmoves', 'closings', 'reservations'];
 
   Future<void> load() async {
     final kv = await backend.loadKv();

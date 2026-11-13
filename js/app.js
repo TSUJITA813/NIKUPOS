@@ -1011,11 +1011,17 @@ Store.init().then(function () {
     });
   }
 
+  /** 「〒123-4567 住所」 */
+  function addressLine() {
+    return [settings.zip ? '〒' + settings.zip : '', settings.address || ''].filter(Boolean).join(' ');
+  }
   function receiptHtml(sale, reprint) {
     var d = new Date(sale.at);
     var h = '';
+    // ロゴマーク（Flutter版の管理で設定した白黒の画像）
+    if (settings.logo && /^[A-Za-z0-9+/=]+$/.test(settings.logo)) h += '<div class="c"><img class="logo" alt="" src="data:image/png;base64,' + settings.logo + '"></div>';
     h += '<div class="c title">' + esc(settings.storeName) + '</div>';
-    if (settings.address) h += '<div class="c">' + esc(settings.address) + '</div>';
+    if (addressLine()) h += '<div class="c">' + esc(addressLine()) + '</div>';
     if (settings.tel) h += '<div class="c">TEL ' + esc(settings.tel) + '</div>';
     if (settings.invoiceNo) h += '<div class="c">登録番号 ' + esc(settings.invoiceNo) + '</div>';
     h += '<div class="c" style="margin-top:4px">' + (sale.kind === 'return' ? '返品・返金' : settings.invoiceNo ? '領収書（適格簡易請求書）' : '領収書') + '</div>';
@@ -1376,7 +1382,7 @@ Store.init().then(function () {
         : pm.cashless > 0 ? '<div>' + esc(sale.cashlessType || 'キャッシュレス') + 'でのお支払い</div>' : '') +
       (needStamp ? '<div style="border:1px dashed #000;width:22mm;height:22mm;margin:6px 0;text-align:center;font-size:10px;padding-top:7mm">収入印紙</div>' : '') +
       '<hr><div class="c" style="font-weight:700">' + esc(settings.storeName) + '</div>' +
-      (settings.address ? '<div class="c">' + esc(settings.address) + '</div>' : '') +
+      (addressLine() ? '<div class="c">' + esc(addressLine()) + '</div>' : '') +
       (settings.tel ? '<div class="c">TEL ' + esc(settings.tel) + '</div>' : '') +
       (settings.invoiceNo ? '<div class="c">登録番号 ' + esc(settings.invoiceNo) + '</div>' : '') +
       (sale.staff ? '<div class="c">担当 ' + esc(sale.staff) + '</div>' : '');
@@ -2049,7 +2055,7 @@ Store.init().then(function () {
   // ================= 設定 =================
   function renderSettings() {
     var f = $('settingsForm');
-    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax', 'floatDefault'].forEach(function (k) { f.elements[k].value = settings[k] == null ? '' : settings[k]; });
+    ['storeName', 'zip', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax', 'floatDefault'].forEach(function (k) { f.elements[k].value = settings[k] == null ? '' : settings[k]; });
     f.elements.cashlessTypes.value = cashlessTypes().join(',');
     f.elements.categories.value = settings.categories.join(',');
     f.autoPrint.checked = !!settings.autoPrint;
@@ -2177,7 +2183,9 @@ Store.init().then(function () {
     POS.requirePerm('settings', '設定の変更').then(function (ok) { if (ok) saveSettingsForm(form); });
   });
   function saveSettingsForm(f) {
-    ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax'].forEach(function (k) { settings[k] = f.elements[k].value.trim(); });
+    ['storeName', 'zip', 'address', 'tel', 'invoiceNo', 'footer', 'rounding', 'paperWidth', 'scaleMode', 'scaleUnit', 'bankInfo', 'feeMax'].forEach(function (k) { settings[k] = f.elements[k].value.trim(); });
+    var zd = settings.zip.replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }).replace(/[^0-9]/g, '');
+    if (zd.length === 7) settings.zip = zd.slice(0, 3) + '-' + zd.slice(3);
     settings.feeMax = Math.max(0, Math.floor(Number(settings.feeMax) || 0));
     settings.floatDefault = Math.max(0, Math.floor(Number(f.elements.floatDefault.value) || 0));
     settings.cashlessTypes = f.elements.cashlessTypes.value.split(/[,、，]/).map(function (x) { return x.trim(); }).filter(Boolean);

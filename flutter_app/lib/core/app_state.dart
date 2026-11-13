@@ -6,10 +6,13 @@ import 'package:flutter/foundation.dart';
 
 import 'auth.dart';
 import 'calc.dart';
+import 'closing.dart';
 import 'reservation.dart';
 import 'sound.dart';
 import 'store.dart';
 import 'sync.dart';
+
+export 'closing.dart';
 
 /// 画面のレイアウト（端末ごとに選べる）。auto は画面の大きさで自動
 enum LayoutMode { auto, phone, tablet }
@@ -291,6 +294,63 @@ class AppState extends ChangeNotifier {
     await store.put('sales', sale);
     log('void', '取引No.${sale['noLabel'] ?? sale['no']} を取消 ${yen((sale['totals'] as Map)['total'] as num)}');
     notifyListeners();
+  }
+
+  // ---------------- 入出金・レジ締め ----------------
+  String get myDev => (settings['deviceCode'] ?? '') as String;
+  List<Json> get cashmoves => store.all('cashmoves');
+  List<Json> get closings => store.all('closings');
+
+  /// この端末の、その日のレジのまとめ
+  DrawerSummary drawerOf(String date) => drawerSummary(
+        sales: store.sales,
+        reservations: reservations,
+        cashmoves: cashmoves,
+        slips: store.all('slips'),
+        receipts: store.all('receipts'),
+        date: date,
+        dev: myDev,
+      );
+
+  ({int amount, String from}) floatOf(String date) =>
+      defaultFloat(cashmoves: cashmoves, closings: closings, date: date, dev: myDev, setting: settings['floatDefault']);
+
+  Future<Json> addCashMove(String date, String kind, int amount, {String account = '', int taxRate = 0, String memo = ''}) async {
+    final m = <String, dynamic>{
+      'id': Store.newId('K'),
+      'at': DateTime.now().toUtc().toIso8601String(),
+      'date': date,
+      'dev': myDev,
+      'staff': adminId ?? '',
+      'kind': kind,
+      'amount': amount,
+      'account': account,
+      'taxRate': taxRate,
+      'memo': memo,
+    };
+    await store.put('cashmoves', m);
+    log('cashmove', '${cashMoveKinds[kind]} ${yen(amount)}${account.isNotEmpty ? '（$account）' : ''}${memo.isNotEmpty ? ' $memo' : ''}');
+    notifyListeners();
+    sync?.start();
+    return m;
+  }
+
+  Future<void> deleteCashMove(Json m) async {
+    await store.delete('cashmoves', m['id'] as String);
+    log('cashmove-delete', '${cashMoveKinds[m['kind']]} ${yen(m['amount'] as num)} を削除');
+    notifyListeners();
+    sync?.start();
+  }
+
+  /// レジ締め（精算）を記録する
+  Future<Json> saveClosing(Json c) async {
+    c['id'] = Store.newId('Z');
+    await store.put('closings', c);
+    log('closing', '${c['date']} 精算・実際の現金 ${yen(c['counted'] as num)}・過不足 ${signedYen(c['diff'] as num)}');
+    Sound.play(Sfx.done);
+    notifyListeners();
+    sync?.start();
+    return c;
   }
 
   // ---------------- 予約・取り置き ----------------

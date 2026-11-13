@@ -1,13 +1,58 @@
 // レシートの中身（画面表示用。レシートプリンター対応の時にも同じ中身を使う）
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'app_state.dart';
 import 'calc.dart';
 
 class RLine {
   final String left, right;
   final bool center, big, bold, hr, indent;
-  const RLine(this.left, {this.right = '', this.center = false, this.big = false, this.bold = false, this.hr = false, this.indent = false});
+
+  /// 画像（ロゴマーク）。PNG のデータ
+  final Uint8List? image;
+  const RLine(this.left, {this.right = '', this.center = false, this.big = false, this.bold = false, this.hr = false, this.indent = false, this.image});
   const RLine.hr() : this('', hr: true);
+  const RLine.image(Uint8List data) : this('', image: data);
+}
+
+String? _logoKey;
+Uint8List? _logoBytes;
+
+/// 設定のロゴマーク（なければ null）
+Uint8List? logoOf(Json settings) {
+  final v = settings['logo'];
+  if (v is! String || v.isEmpty) return null;
+  if (v != _logoKey) {
+    try {
+      _logoBytes = base64Decode(v);
+    } catch (_) {
+      _logoBytes = null;
+    }
+    _logoKey = v;
+  }
+  return _logoBytes;
+}
+
+/// 「〒123-4567 住所」の形にする
+String addressLine(Json settings) {
+  final zip = (settings['zip'] ?? '').toString().trim();
+  final addr = (settings['address'] ?? '').toString().trim();
+  return [if (zip.isNotEmpty) '〒$zip', if (addr.isNotEmpty) addr].join(' ');
+}
+
+/// レシートの上の店名・住所など（ロゴがあれば一番上に）
+List<RLine> storeHeader(Json settings) {
+  String s(Object? v) => (v ?? '').toString();
+  final logo = logoOf(settings);
+  final addr = addressLine(settings);
+  return [
+    if (logo != null) RLine.image(logo),
+    RLine(s(settings['storeName']), center: true, big: true, bold: true),
+    if (addr.isNotEmpty) RLine(addr, center: true),
+    if (s(settings['tel']).isNotEmpty) RLine('TEL ${settings['tel']}', center: true),
+  ];
 }
 
 String discLabel(Json? d) {
@@ -24,9 +69,7 @@ List<RLine> receiptLines(Json sale, Json settings, {bool reprint = false}) {
   final out = <RLine>[];
   final d = DateTime.parse(sale['at'] as String).toLocal();
   String s(Object? v) => (v ?? '').toString();
-  out.add(RLine(s(settings['storeName']), center: true, big: true, bold: true));
-  if (s(settings['address']).isNotEmpty) out.add(RLine(s(settings['address']), center: true));
-  if (s(settings['tel']).isNotEmpty) out.add(RLine('TEL ${settings['tel']}', center: true));
+  out.addAll(storeHeader(settings));
   if (s(settings['invoiceNo']).isNotEmpty) out.add(RLine('登録番号 ${settings['invoiceNo']}', center: true));
   out.add(RLine(sale['kind'] == 'return' ? '返品・返金' : s(settings['invoiceNo']).isNotEmpty ? '領収書（適格簡易請求書）' : '領収書', center: true));
   if (sale['void'] == true) out.add(const RLine('＊ 取 消 ＊', center: true, big: true, bold: true));
@@ -80,3 +123,13 @@ List<RLine> receiptLines(Json sale, Json settings, {bool reprint = false}) {
   if (s(settings['footer']).isNotEmpty) out.add(RLine(s(settings['footer']), center: true));
   return out;
 }
+
+/// 郵便番号を「123-4567」の形にそろえる（全角の数字も可）
+String normZip(String v) {
+  final d = v.replaceAllMapped(RegExp('[０-９]'), (m) => String.fromCharCode(m[0]!.codeUnitAt(0) - 0xFF10 + 0x30)).replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.length == 7) return '${d.substring(0, 3)}-${d.substring(3)}';
+  return v.trim();
+}
+
+/// base64 の画像 → データ
+Uint8List logoBytesOf(String b64) => base64Decode(b64);

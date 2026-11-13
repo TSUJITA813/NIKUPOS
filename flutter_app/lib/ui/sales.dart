@@ -1,10 +1,12 @@
 // 売上（日別の売上・取引一覧・取消）
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../core/app_state.dart';
 import '../core/calc.dart';
 import '../core/receipt.dart';
+import 'closing.dart';
 import 'common.dart';
 import 'register.dart';
 
@@ -16,6 +18,9 @@ class SalesPage extends StatefulWidget {
 
 class _SalesPageState extends State<SalesPage> {
   DateTime date = DateTime.now();
+
+  /// 表示：sales 売上 / cash 入出金 / close レジ締め
+  String view = 'sales';
 
   String payLabel(Json x) {
     final p = salePayments(x);
@@ -60,7 +65,24 @@ class _SalesPageState extends State<SalesPage> {
         ),
         IconButton.outlined(onPressed: () => setState(() => date = date.add(const Duration(days: 1))), icon: const Icon(Icons.chevron_right)),
       ]),
+      if (!kIsWeb) ...[
+        const SizedBox(height: 6),
+        ChoiceBar<String>(
+          options: const [('sales', '売上'), ('cash', '入出金'), ('close', 'レジ締め')],
+          icons: const {'sales': Icons.bar_chart, 'cash': Icons.swap_vert, 'close': Icons.lock_clock_outlined},
+          value: view,
+          onChanged: (v) => setState(() => view = v),
+        ),
+      ],
       const SizedBox(height: 8),
+      if (view == 'cash') CashMovesView(date: d),
+      if (view == 'close') ClosingView(key: ValueKey('close-$d'), date: d),
+      if (view == 'sales') ..._salesBody(context, s, d, sum, list, items, depCash, depCashless, depRefund),
+    ]);
+  }
+
+  List<Widget> _salesBody(BuildContext context, AppState s, String d, DaySummary sum, List<Json> list, List items, int depCash, int depCashless, int depRefund) {
+    return [
       CardGrid(children: [
         StatCard('売上合計', Text(yen(sum.total))),
         StatCard('客数', Text('${sum.count}件')),
@@ -99,7 +121,7 @@ class _SalesPageState extends State<SalesPage> {
             onTap: () => saleDetail(context, x),
           ),
         ),
-    ]);
+    ];
   }
 
   Future<void> saleDetail(BuildContext context, Json x) async {

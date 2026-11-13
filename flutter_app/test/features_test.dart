@@ -220,19 +220,11 @@ void main() {
     await t.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('操作音の設定：オン・オフ、音量（つまみ・ボタン）が動く', (t) async {
+  testWidgets('操作音の設定：オン・オフ、音量（つまみ・ボタン）が動く（パスワードなしで開ける）', (t) async {
     final s = await boot(t, const Size(390, 844));
-    await t.tap(find.byKey(const ValueKey('nav-管理')));
+    await t.tap(find.byKey(const ValueKey('deviceSettings')));
     await t.pumpAndSettle();
-    await t.enterText(find.byKey(const ValueKey('authId')), 'tenshu');
-    await t.enterText(find.byKey(const ValueKey('authPw')), 'toriniku2026');
-    await t.enterText(find.byKey(const ValueKey('authPw2')), 'toriniku2026');
-    await t.tap(find.byKey(const ValueKey('authSubmit')));
-    await t.pumpAndSettle();
-    await t.tap(find.byKey(const ValueKey('recoveryOk')));
-    await t.pumpAndSettle();
-    await t.tap(find.text('設定'));
-    await t.pumpAndSettle();
+    expect(find.text('この端末の設定'), findsOneWidget);
     expect(s.soundVolume, 0.7);
     await tapKey(t, 'soundUp');
     expect(s.soundVolume, closeTo(0.8, 0.001));
@@ -244,7 +236,7 @@ void main() {
     await t.drag(find.byKey(const ValueKey('soundVol')), const Offset(300, 0));
     await t.pumpAndSettle();
     expect(s.soundVolume, closeTo(1.0, 0.001));
-    expect(find.text('設定'), findsWidgets);
+    expect(find.text('この端末の設定'), findsOneWidget);
     expect(find.byKey(const ValueKey('soundPct')), findsOneWidget);
     await tapKey(t, 'soundOn');
     expect(s.soundOn, false);

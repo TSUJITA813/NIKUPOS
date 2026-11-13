@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../core/app_state.dart';
 import 'admin.dart';
 import 'common.dart';
+import 'device_settings.dart';
 import 'register.dart';
 import 'reservations.dart';
 import '../core/profit.dart' show ymd;
@@ -93,6 +94,13 @@ class _HomeShellState extends State<HomeShell> {
             toast(context, s.soundOn ? '操作音をオンにしました' : '操作音をオフにしました');
           },
         ),
+        if (!kIsWeb)
+          IconButton(
+            key: const ValueKey('deviceSettings'),
+            tooltip: 'この端末の設定（操作音・画面・釣銭準備金）',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const DeviceSettingsPage())),
+          ),
         Padding(
           padding: const EdgeInsets.only(right: 12),
           child: Center(child: Text('${now.month}/${now.day} ${timeStr(now)}', style: const TextStyle(fontSize: 15))),

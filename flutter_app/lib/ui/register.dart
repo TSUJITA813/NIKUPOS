@@ -6,8 +6,10 @@ import 'package:flutter/services.dart';
 import '../core/app_state.dart';
 import '../core/calc.dart';
 import '../core/receipt.dart';
+import '../core/receipt_pdf.dart';
 import '../core/sound.dart';
 import 'common.dart';
+import 'reservations.dart' show outputPdf, pdfFont;
 
 String priceLabel(Json p) {
   if (p['unit'] == 'g') return '${yen(p['price'] as num)}/100g';
@@ -854,14 +856,24 @@ Future<void> doneDialog(BuildContext context, Json sale) async {
   );
 }
 
-Future<void> receiptDialog(BuildContext context, Json sale, {bool reprint = false}) => showDialog<void>(
-      context: context,
-      builder: (c) => AlertDialog(
-        contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-        content: SizedBox(width: 340, child: SingleChildScrollView(child: ReceiptView(lines: receiptLines(sale, AppScope.read(context).settings, reprint: reprint)))),
-        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('閉じる'))],
-      ),
-    );
+Future<void> receiptDialog(BuildContext context, Json sale, {bool reprint = false}) {
+  final lines = receiptLines(sale, AppScope.read(context).settings, reprint: reprint);
+  return showDialog<void>(
+    context: context,
+    builder: (c) => AlertDialog(
+      contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      content: SizedBox(width: 340, child: SingleChildScrollView(child: ReceiptView(lines: lines))),
+      actions: [
+        TextButton.icon(
+          icon: const Icon(Icons.print_outlined),
+          onPressed: () => outputPdf(c, 'レシート No.${noOf(sale)}', () async => receiptPdf(lines, await pdfFont(), title: 'レシート')),
+          label: const Text('印刷・共有'),
+        ),
+        TextButton(onPressed: () => Navigator.pop(c), child: const Text('閉じる')),
+      ],
+    ),
+  );
+}
 
 class ReceiptView extends StatelessWidget {
   final List<RLine> lines;
@@ -870,7 +882,12 @@ class ReceiptView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       for (final l in lines)
-        if (l.hr)
+        if (l.image != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 200, maxHeight: 120), child: Image.memory(l.image!, gaplessPlayback: true))),
+          )
+        else if (l.hr)
           const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Divider(height: 1, color: ink))
         else if (l.center)
           Text(l.left, textAlign: TextAlign.center, style: TextStyle(fontSize: l.big ? 20 : 14, fontWeight: l.bold ? FontWeight.w800 : FontWeight.w400))

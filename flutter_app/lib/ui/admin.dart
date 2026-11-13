@@ -8,8 +8,10 @@ import '../core/app_state.dart';
 import '../core/auth.dart';
 import '../core/calc.dart';
 import '../core/profit.dart';
+import '../core/receipt.dart' show normZip;
 import '../core/sound.dart';
 import 'common.dart';
+import 'logo_settings.dart';
 import 'sync_settings.dart';
 
 class AdminPage extends StatelessWidget {
@@ -708,7 +710,7 @@ class _SettingsAdminState extends State<SettingsAdmin> {
     final st = AppScope.read(context).settings;
     String sv(String k) => (st[k] ?? '').toString();
     f = {
-      for (final k in ['storeName', 'address', 'tel', 'fax', 'invoiceNo', 'footer', 'deviceCode']) k: TextEditingController(text: sv(k)),
+      for (final k in ['storeName', 'zip', 'address', 'tel', 'fax', 'invoiceNo', 'footer']) k: TextEditingController(text: sv(k)),
       'categories': TextEditingController(text: ((st['categories'] as List?) ?? const []).join(',')),
       'cashlessTypes': TextEditingController(text: ((st['cashlessTypes'] as List?) ?? const []).join(',')),
     };
@@ -726,9 +728,11 @@ class _SettingsAdminState extends State<SettingsAdmin> {
 
   Future<void> save() async {
     final s = AppScope.read(context);
-    for (final k in ['storeName', 'address', 'tel', 'fax', 'invoiceNo', 'footer', 'deviceCode']) {
+    for (final k in ['storeName', 'address', 'tel', 'fax', 'invoiceNo', 'footer']) {
       s.settings[k] = f[k]!.text.trim();
     }
+    s.settings['zip'] = normZip(f['zip']!.text);
+    f['zip']!.text = s.settings['zip'] as String;
     final cats = split(f['categories']!.text);
     s.settings['categories'] = cats.isEmpty ? ['その他'] : cats;
     s.settings['cashlessTypes'] = split(f['cashlessTypes']!.text);
@@ -737,10 +741,11 @@ class _SettingsAdminState extends State<SettingsAdmin> {
     if (mounted) toast(context, '設定を保存しました');
   }
 
-  Widget field(String k, String label, {int lines = 1, String? hint}) => TextField(
+  Widget field(String k, String label, {int lines = 1, String? hint, bool number = false}) => TextField(
         key: ValueKey('set-$k'),
         controller: f[k],
         maxLines: lines,
+        keyboardType: number ? TextInputType.number : null,
         decoration: InputDecoration(labelText: label, hintText: hint),
       );
 
@@ -753,33 +758,20 @@ class _SettingsAdminState extends State<SettingsAdmin> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 620),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            h2('画面のレイアウト（この端末）'),
-            const Text('スマートフォン向けとタブレット向けの画面を切り替えられます。「自動」は画面の大きさで選びます。', style: TextStyle(color: muted)),
-            RadioGroup<LayoutMode>(
-              groupValue: s.layoutMode,
-              onChanged: (v) => s.setLayoutMode(v!),
-              child: Column(children: [
-                for (final m in LayoutMode.values)
-                  RadioListTile<LayoutMode>(
-                    key: ValueKey('layout-${m.name}'),
-                    value: m,
-                    title: Text(layoutModeLabel(m)),
-                    subtitle: m == LayoutMode.auto ? Text('今の画面：${MediaQuery.sizeOf(context).shortestSide >= 600 ? 'タブレット向け' : 'スマートフォン向け'}') : null,
-                  ),
-              ]),
-            ),
-            h2('操作音（この端末）'),
-            const SoundSettings(),
+            const Text('操作音・画面のレイアウト・端末の記号・釣銭準備金は、画面上の ⚙（この端末の設定）で変えられます（パスワードは不要です）。', style: TextStyle(color: muted)),
             h2('店舗・レシート'),
             field('storeName', '店名'),
-            field('address', '住所'),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(width: 150, child: field('zip', '郵便番号', hint: '123-4567', number: true)),
+              const SizedBox(width: 12),
+              Expanded(child: field('address', '住所')),
+            ]),
             field('tel', '電話番号'),
             field('fax', 'FAX番号（FAX注文用紙・予約確認書に載せます）'),
             field('invoiceNo', 'インボイス登録番号', hint: 'T1234567890123'),
             field('footer', 'レシート末尾メッセージ', lines: 2),
             field('categories', '商品カテゴリ（カンマ区切り）'),
             field('cashlessTypes', 'キャッシュレスの種類（カンマ区切り）', hint: 'クレジット,電子マネー,QR決済'),
-            field('deviceCode', 'この端末の記号（複数端末で使うとき。例：A）'),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               initialValue: s.rounding,
@@ -793,6 +785,8 @@ class _SettingsAdminState extends State<SettingsAdmin> {
             ),
             const SizedBox(height: 12),
             FilledButton(key: const ValueKey('settingsSave'), onPressed: save, child: const Text('保存')),
+            h2('レシートのロゴマーク'),
+            const LogoSettings(),
             h2('クラウド同期（全端末・管理画面で共有）'),
             const SyncSettings(),
             h2('管理者（ID・パスワード）'),
