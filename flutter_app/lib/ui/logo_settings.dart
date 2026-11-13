@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../core/logo.dart';
 import '../core/receipt.dart';
 import 'common.dart';
+import 'register.dart' show ReceiptView;
 
 class LogoSettings extends StatefulWidget {
   const LogoSettings({super.key});
@@ -47,14 +48,42 @@ class _LogoSettingsState extends State<LogoSettings> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const Text('レシートの一番上に印字します。白黒（2色）に変えて、レシートの幅に合わせて小さくします。お店のマークや看板の画像がおすすめです。', style: TextStyle(color: muted)),
       const SizedBox(height: 8),
-      Container(
-        height: 130,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: line)),
-        child: logo == null
-            ? const Text('ロゴマークはありません', style: TextStyle(color: muted))
-            : Padding(padding: const EdgeInsets.all(8), child: Image.memory(logo, key: const ValueKey('logoPreview'), gaplessPlayback: true)),
-      ),
+      if (logo == null)
+        Container(
+          height: 80,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: line)),
+          child: const Text('ロゴマークはありません', style: TextStyle(color: muted)),
+        )
+      else ...[
+        const Text('レシートの見本（大きさは縦長・横長に合わせて自動で整えます）', style: TextStyle(color: muted, fontSize: 13)),
+        const SizedBox(height: 4),
+        Center(
+          child: Container(
+            key: const ValueKey('logoPreview'),
+            width: 300,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: line), boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 6)]),
+            child: ReceiptView(lines: [
+              ...storeHeader(s.settings),
+              const RLine('領収書', center: true),
+              const RLine.hr(),
+              const RLine('（商品）', right: '¥000'),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text('ロゴの大きさ', style: TextStyle(color: muted, fontSize: 13)),
+        ChoiceBar<String>(
+          height: 42,
+          options: logoSizeLabels,
+          value: logoSizes.containsKey(s.settings['logoSize']) ? s.settings['logoSize'] as String : 'normal',
+          onChanged: (v) async {
+            s.settings['logoSize'] = v;
+            await s.saveSettings();
+          },
+        ),
+      ],
       const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, children: [
         FilledButton.icon(

@@ -296,7 +296,7 @@ tr.void td.act { text-decoration: none; }
 .receipt .title { font-size: 1.5em; font-weight: 700; }
 .receipt .row { display: flex; justify-content: space-between; gap: 6px; }
 .receipt .row > span:last-child { white-space: nowrap; }
-.receipt img.logo { max-width: 60%; max-height: 30mm; image-rendering: pixelated; }
+.receipt img.logo { max-width: 100%; image-rendering: pixelated; margin-bottom: 4px; }
 .receipt .ind { padding-left: 1em; }
 .receipt .big { font-size: 1.5em; font-weight: 700; }
 .receipt hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }

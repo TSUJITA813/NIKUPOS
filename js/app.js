@@ -1011,6 +1011,26 @@ Store.init().then(function () {
     });
   }
 
+  /**
+   * ロゴの大きさ（Flutter版の logoBox と同じ考え方）：縦長・横長でも見た目の量がそろうよう面積を一定にし、
+   * 幅は紙の70%・高さは紙の幅の30%まで。％は紙の幅に対する割合
+   */
+  function logoStyle() {
+    var ratio = 2;
+    try {
+      var b = atob(settings.logo.slice(0, 44));
+      var be = function (i) { return ((b.charCodeAt(i) << 24) >>> 0) + (b.charCodeAt(i + 1) << 16) + (b.charCodeAt(i + 2) << 8) + b.charCodeAt(i + 3); };
+      var w = be(16), hh = be(20);
+      if (w > 0 && hh > 0) ratio = w / hh;
+    } catch (e) { /* 読めなければ横長として扱う */ }
+    var scale = { small: 0.6, normal: 1, large: 1.5 }[settings.logoSize] || 1;
+    var area = 0.1 * scale;
+    var w2 = Math.sqrt(area * ratio), h2 = Math.sqrt(area / ratio);
+    var maxW = Math.min(0.7 * Math.sqrt(scale), 0.95), maxH = 0.3 * Math.sqrt(scale);
+    if (w2 > maxW) { w2 = maxW; h2 = w2 / ratio; }
+    if (h2 > maxH) { h2 = maxH; w2 = h2 * ratio; }
+    return 'width:' + (w2 * 100).toFixed(1) + '%;height:auto';
+  }
   /** 「〒123-4567 住所」 */
   function addressLine() {
     return [settings.zip ? '〒' + settings.zip : '', settings.address || ''].filter(Boolean).join(' ');
@@ -1019,7 +1039,7 @@ Store.init().then(function () {
     var d = new Date(sale.at);
     var h = '';
     // ロゴマーク（Flutter版の管理で設定した白黒の画像）
-    if (settings.logo && /^[A-Za-z0-9+/=]+$/.test(settings.logo)) h += '<div class="c"><img class="logo" alt="" src="data:image/png;base64,' + settings.logo + '"></div>';
+    if (settings.logo && /^[A-Za-z0-9+/=]+$/.test(settings.logo)) h += '<div class="c"><img class="logo" alt="" style="' + logoStyle() + '" src="data:image/png;base64,' + settings.logo + '"></div>';
     h += '<div class="c title">' + esc(settings.storeName) + '</div>';
     if (addressLine()) h += '<div class="c">' + esc(addressLine()) + '</div>';
     if (settings.tel) h += '<div class="c">TEL ' + esc(settings.tel) + '</div>';

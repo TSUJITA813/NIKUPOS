@@ -884,8 +884,11 @@ class ReceiptView extends StatelessWidget {
       for (final l in lines)
         if (l.image != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 200, maxHeight: 120), child: Image.memory(l.image!, gaplessPlayback: true))),
+            padding: const EdgeInsets.only(top: 2, bottom: 8),
+            child: LayoutBuilder(builder: (c, box) {
+              final b = logoBox(l.image!, box.maxWidth, scale: l.imageScale);
+              return Center(child: SizedBox(width: b.w, height: b.h, child: Image.memory(l.image!, fit: BoxFit.contain, gaplessPlayback: true, filterQuality: FilterQuality.medium)));
+            }),
           )
         else if (l.hr)
           const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Divider(height: 1, color: ink))

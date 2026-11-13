@@ -10,7 +10,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import 'app_state.dart' show yen;
 import 'calc.dart';
-import 'receipt.dart' show addressLine, logoOf;
+import 'receipt.dart' show addressLine, logoBox, logoOf, logoScaleOf;
 import 'reservation.dart';
 
 const _week = '月火水木金土日';
@@ -24,7 +24,14 @@ String jpDate(String ymd) {
 String _s(Object? v) => (v ?? '').toString();
 
 pw.Widget _storeBlock(Json st, {pw.CrossAxisAlignment align = pw.CrossAxisAlignment.end}) => pw.Column(crossAxisAlignment: align, children: [
-      if (logoOf(st) != null) pw.Padding(padding: const pw.EdgeInsets.only(bottom: 4), child: pw.Image(pw.MemoryImage(logoOf(st)!), height: 40)),
+      if (logoOf(st) != null)
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 4),
+          child: pw.Builder(builder: (c) {
+            final b = logoBox(logoOf(st)!, 160, scale: logoScaleOf(st));
+            return pw.SizedBox(width: b.w, height: b.h, child: pw.Image(pw.MemoryImage(logoOf(st)!), fit: pw.BoxFit.contain));
+          }),
+        ),
       pw.Text(_s(st['storeName']), style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold)),
       if (addressLine(st).isNotEmpty) pw.Text(addressLine(st), style: const pw.TextStyle(fontSize: 10)),
       if (_s(st['tel']).isNotEmpty) pw.Text('TEL ${st['tel']}', style: const pw.TextStyle(fontSize: 10)),

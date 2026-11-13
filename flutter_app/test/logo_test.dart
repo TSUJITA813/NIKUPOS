@@ -32,4 +32,21 @@ void main() {
   test('ロゴマーク：画像でないデータは null', () {
     expect(makeLogo((bytes: Uint8List.fromList([1, 2, 3]), darkness: 'normal')), isNull);
   });
+
+  test('ロゴの大きさ：縦長は高さをおさえ、横長は幅をおさえる（見た目の量をそろえる）', () {
+    Uint8List png(int w, int h) => Uint8List.fromList(img.encodePng(img.Image(width: w, height: h, numChannels: 1)));
+    const paper = 300.0;
+    final tall = logoBox(png(120, 260), paper); // 縦長（看板の文字など）
+    expect(tall.h, closeTo(90, 0.01)); // 紙の幅の30%まで
+    expect(tall.w, closeTo(90 * 120 / 260, 0.01));
+    final wide = logoBox(png(384, 96), paper); // 横長
+    expect(wide.w <= 210.01, true); // 紙の幅の70%まで
+    expect(wide.w / wide.h, closeTo(4, 0.01));
+    final sq = logoBox(png(200, 200), paper);
+    expect(sq.w, closeTo(sq.h, 0.01));
+    expect(sq.h <= 90.01, true);
+    // 小さめ・大きめ
+    expect(logoBox(png(120, 260), paper, scale: 0.6).h < tall.h, true);
+    expect(logoBox(png(120, 260), paper, scale: 1.5).h > tall.h, true);
+  });
 }

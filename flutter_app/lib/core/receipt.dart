@@ -1,6 +1,7 @@
 // レシートの中身（画面表示用。レシートプリンター対応の時にも同じ中身を使う）
 
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'app_state.dart';
@@ -12,9 +13,45 @@ class RLine {
 
   /// 画像（ロゴマーク）。PNG のデータ
   final Uint8List? image;
-  const RLine(this.left, {this.right = '', this.center = false, this.big = false, this.bold = false, this.hr = false, this.indent = false, this.image});
+
+  /// ロゴの大きさの倍率（小さめ 0.6・ふつう 1・大きめ 1.5）
+  final double imageScale;
+  const RLine(this.left, {this.right = '', this.center = false, this.big = false, this.bold = false, this.hr = false, this.indent = false, this.image, this.imageScale = 1});
   const RLine.hr() : this('', hr: true);
-  const RLine.image(Uint8List data) : this('', image: data);
+  const RLine.image(Uint8List data, {double scale = 1}) : this('', image: data, imageScale: scale);
+}
+
+/// ロゴの大きさ（設定の logoSize）
+const logoSizes = {'small': 0.6, 'normal': 1.0, 'large': 1.5};
+const logoSizeLabels = [('small', '小さめ'), ('normal', 'ふつう'), ('large', '大きめ')];
+double logoScaleOf(Json settings) => logoSizes[settings['logoSize']] ?? 1.0;
+
+/// PNG の縦横の点の数（読めなければ null）
+({int w, int h})? pngSize(Uint8List b) {
+  if (b.length < 24 || b[0] != 0x89 || b[1] != 0x50) return null;
+  int be(int i) => (b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3];
+  final w = be(16), h = be(20);
+  return w > 0 && h > 0 ? (w: w, h: h) : null;
+}
+
+/// 紙の幅 paperW に対して、ロゴを置く大きさ。
+/// 縦長・横長・正方形でも見た目の「量」がそろうよう、面積を一定にして、
+/// 幅は紙の 70%・高さは紙の幅の 30% までにおさえる（scale で全体を大きく・小さく）
+({double w, double h}) logoBox(Uint8List bytes, double paperW, {double scale = 1}) {
+  final sz = pngSize(bytes);
+  final ratio = sz == null ? 2.0 : sz.w / sz.h; // 横 ÷ 縦
+  final area = 0.1 * paperW * paperW * scale;
+  var w = math.sqrt(area * ratio), h = math.sqrt(area / ratio);
+  final maxW = paperW * (0.7 * math.sqrt(scale)).clamp(0.0, 0.95), maxH = paperW * 0.3 * math.sqrt(scale);
+  if (w > maxW) {
+    w = maxW;
+    h = w / ratio;
+  }
+  if (h > maxH) {
+    h = maxH;
+    w = h * ratio;
+  }
+  return (w: w, h: h);
 }
 
 String? _logoKey;
@@ -48,7 +85,7 @@ List<RLine> storeHeader(Json settings) {
   final logo = logoOf(settings);
   final addr = addressLine(settings);
   return [
-    if (logo != null) RLine.image(logo),
+    if (logo != null) RLine.image(logo, scale: logoScaleOf(settings)),
     RLine(s(settings['storeName']), center: true, big: true, bold: true),
     if (addr.isNotEmpty) RLine(addr, center: true),
     if (s(settings['tel']).isNotEmpty) RLine('TEL ${settings['tel']}', center: true),
