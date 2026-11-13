@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- クラウド同期（Firebase）・レシートプリンターとの通信に使う -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="NIKUPOS"
         android:name="${applicationName}"
