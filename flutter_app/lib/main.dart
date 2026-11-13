@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/app_state.dart';
+import 'core/sound.dart';
 import 'core/store.dart';
 import 'ui/common.dart';
 import 'ui/shell.dart';
@@ -15,6 +16,7 @@ Future<void> main() async {
   await backend.open();
   final state = AppState(Store(backend));
   await state.init();
+  await Sound.init();
   runApp(NikuposApp(state: state));
 }
 

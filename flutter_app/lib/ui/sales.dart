@@ -36,6 +36,16 @@ class _SalesPageState extends State<SalesPage> {
     final sum = summarizeDay(s.store.sales, d);
     final list = sum.sales.toList()..sort((a, b) => (b['at'] as String).compareTo(a['at'] as String));
     final items = sum.items.values.toList()..sort((a, b) => b.amount.compareTo(a.amount));
+    // 予約の前受金（その日に受け取った・返金した分）
+    var depCash = 0, depCashless = 0, depRefund = 0;
+    for (final r in s.reservations) {
+      final dep = ((r['deposit'] ?? 0) as num).toInt();
+      if (dep == 0) continue;
+      if (r['depositDate'] == d) {
+        if (r['depositMethod'] == 'cashless') { depCashless += dep; } else { depCash += dep; }
+      }
+      if (r['depositRefundDate'] == d) depRefund += dep;
+    }
     return ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
         IconButton.outlined(onPressed: () => setState(() => date = date.subtract(const Duration(days: 1))), icon: const Icon(Icons.chevron_left)),
@@ -58,6 +68,9 @@ class _SalesPageState extends State<SalesPage> {
         StatCard('現金', Text(yen(sum.cash))),
         StatCard('キャッシュレス', Text(yen(sum.cashless)), sub: sum.cashlessBy.isEmpty ? null : Text(sum.cashlessBy.entries.map((e) => '${e.key} ${yen(e.value)}').join('・'))),
         StatCard('値引き・取消', Text(yen(sum.discount)), sub: Text('取消 ${sum.voids}件${sum.returnsCount != 0 ? '・返品 ${sum.returnsCount}件' : ''}')),
+        if (depCash + depCashless + depRefund + sum.depositUsed > 0)
+          StatCard('予約の前受金', Text(yen(depCash + depCashless)),
+              sub: Text('受取 現金 ${yen(depCash)}・キャッシュレス ${yen(depCashless)}${depRefund > 0 ? '・返金 ${yen(depRefund)}' : ''}${sum.depositUsed > 0 ? '・会計で充当 ${yen(sum.depositUsed)}' : ''}')),
       ]),
       const SizedBox(height: 16),
       const Text('商品別', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),

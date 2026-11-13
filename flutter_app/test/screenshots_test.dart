@@ -76,6 +76,30 @@ void main() {
     await t.pump(const Duration(seconds: 3));
   }, skip: !on);
 
+  testWidgets('予約（電話）', (t) async {
+    final s = await start(t, const Size(390, 844));
+    final today = DateTime.now();
+    String d(int n) { final x = DateTime(today.year, today.month, today.day + n); return '${x.year}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}'; }
+    await s.saveReservation({'name': '山田', 'channel': 'phone', 'phone': '090-1234-5678', 'date': d(-10), 'time': '16:00', 'items': [
+      {'productId': 'p1', 'name': 'もも肉', 'unit': 'g', 'price': 158, 'qty': 1500, 'taxRate': 8},
+      {'productId': 'p11', 'name': '焼き鳥 もも', 'unit': 'pc', 'price': 120, 'qty': 10, 'taxRate': 8},
+    ], 'deposit': 0, 'depositMethod': 'cash'});
+    await s.saveReservation({'name': '居酒屋とりまる', 'channel': 'fax', 'fax': '03-9999-0001', 'date': d(0), 'time': '15:30', 'items': [
+      {'productId': 'p13', 'name': 'つくね', 'unit': 'pc', 'price': 140, 'qty': 40, 'taxRate': 8},
+    ], 'deposit': 2000, 'depositMethod': 'cash', 'depositDate': d(-1), 'note': '串に刺した状態で'});
+    await s.saveReservation({'name': '佐藤', 'channel': 'phone', 'phone': '080-2222-3333', 'date': d(0), 'time': '17:00', 'items': [
+      {'productId': 'p4', 'name': '手羽先', 'unit': 'g', 'price': 118, 'qty': 2000, 'taxRate': 8},
+    ], 'deposit': 0, 'depositMethod': 'cash', 'status': 'ready'});
+    await t.tap(find.byKey(const ValueKey('nav-予約')));
+    await shot(t, 'phone_resv_list');
+    await tapKey(t, 'newPhone');
+    await t.enterText(find.byKey(const ValueKey('rPhone')), '09012345678');
+    await t.pumpAndSettle();
+    await tapKey(t, 'sameAsLast');
+    await shot(t, 'phone_resv_form');
+    await t.pump(const Duration(seconds: 3));
+  }, skip: !on);
+
   testWidgets('タブレット', (t) async {
     final s = await start(t, const Size(1280, 800));
     for (final p in s.products) {

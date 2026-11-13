@@ -32,6 +32,7 @@ List<RLine> receiptLines(Json sale, Json settings, {bool reprint = false}) {
   if (sale['void'] == true) out.add(const RLine('＊ 取 消 ＊', center: true, big: true, bold: true));
   if (reprint) out.add(const RLine('＊＊ 再発行 ＊＊', center: true));
   out.add(RLine(dateTimeStr(d), right: 'No.${noOf(sale)}'));
+  if (s(sale['customer']).isNotEmpty) out.add(RLine('${sale['customer']} 様（ご予約）'));
   out.add(const RLine.hr());
   for (final l in (sale['lines'] as List).cast<Json>()) {
     final mark = l['taxRate'] == 8 ? '※' : '';

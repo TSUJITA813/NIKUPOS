@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 
 import 'auth.dart';
 import 'calc.dart';
+import 'reservation.dart';
+import 'sound.dart';
 import 'store.dart';
 
 /// 画面のレイアウト（端末ごとに選べる）。auto は画面の大きさで自動
@@ -38,6 +40,9 @@ class AppState extends ChangeNotifier {
 
   // ---------------- 起動 ----------------
   late Json cart;
+
+  /// 表示中のタブ（0:レジ 1:予約 2:売上 3:管理）。予約から「レジへ」で切り替える
+  final tab = ValueNotifier<int>(0);
   int _lineSeq = DateTime.now().millisecondsSinceEpoch;
   LayoutMode layoutMode = LayoutMode.auto;
 
@@ -46,6 +51,23 @@ class AppState extends ChangeNotifier {
     final c = store.kv('cart');
     cart = c != null ? jsonDecode(c) as Json : _emptyCart();
     layoutMode = layoutModeFrom(store.kv('layoutMode'));
+    Sound.enabled = store.kv('soundOn') != '0';
+    Sound.volume = double.tryParse(store.kv('soundVol') ?? '') ?? 0.7;
+  }
+
+  // ---------------- 操作音（この端末） ----------------
+  bool get soundOn => Sound.enabled;
+  double get soundVolume => Sound.volume;
+  Future<void> setSound({bool? on, double? volume}) async {
+    if (on != null) {
+      Sound.enabled = on;
+      await store.setKv('soundOn', on ? '1' : '0');
+    }
+    if (volume != null) {
+      Sound.volume = volume;
+      await store.setKv('soundVol', volume.toStringAsFixed(2));
+    }
+    notifyListeners();
   }
 
   Json _emptyCart() => {'lines': <Json>[], 'discount': null};
@@ -100,20 +122,36 @@ class AppState extends ChangeNotifier {
     } else {
       lines.add(_newLine(p, 1, price));
     }
+    Sound.play(Sfx.add);
     _saveCart();
   }
 
   void updateLine(String key, {num? qty, int? price, Json? discount, bool clearDiscount = false}) {
     final l = lines.firstWhere((x) => x['key'] == key);
-    if (qty != null) l['qty'] = qty;
+    if (qty != null) {
+      l['qty'] = qty;
+      l.remove('estimated'); // 予約の予定重量を量り直した
+    }
     if (price != null) l['price'] = price;
     if (discount != null) l['discount'] = discount;
     if (clearDiscount) l['discount'] = null;
     _saveCart();
   }
 
-  void removeLine(String key) {
-    lines.removeWhere((x) => x['key'] == key);
+  /// 行を取り消す。元に戻せるよう、取り消した行と位置を返す
+  ({Json line, int index})? removeLine(String key) {
+    final i = lines.indexWhere((x) => x['key'] == key);
+    if (i < 0) return null;
+    final l = lines.removeAt(i);
+    Sound.play(Sfx.remove);
+    _saveCart();
+    return (line: l, index: i);
+  }
+
+  /// 取り消した行を元の位置に戻す
+  void restoreLine(Json line, int index) {
+    lines.insert(index.clamp(0, lines.length), line);
+    Sound.play(Sfx.add);
     _saveCart();
   }
 
@@ -124,6 +162,7 @@ class AppState extends ChangeNotifier {
 
   void clearCart() {
     cart = _emptyCart();
+    Sound.play(Sfx.remove);
     _saveCart();
   }
 
@@ -139,7 +178,9 @@ class AppState extends ChangeNotifier {
     });
     await store.saveHolds();
     log('hold', '会計を保留 ${yen(cartTotals.total)}${memo.isNotEmpty ? '（$memo）' : ''}');
-    clearCart();
+    cart = _emptyCart();
+    Sound.play(Sfx.hold);
+    _saveCart();
   }
 
   /// 呼び出す。今のカートに商品があれば、先に保留する
@@ -153,6 +194,7 @@ class AppState extends ChangeNotifier {
       l['key'] = 'L${_lineSeq++}';
     }
     log('hold', '保留を呼び出し ${yen(cartTotals.total)}');
+    Sound.play(Sfx.hold);
     _saveCart();
   }
 
@@ -169,6 +211,9 @@ class AppState extends ChangeNotifier {
     final c = p.isEmpty ? null : p.first['cost'] as num?;
     return c == null || c == 0 ? null : c.toInt();
   }
+
+  /// カートの前受金（予約から読み込んだとき）
+  int get cartDeposit => ((cart['deposit'] ?? 0) as num).toInt();
 
   /// 会計を確定して保存する（保存が終わってから戻る）
   Future<Json> completeSale(Payment p, String ctype) async {
@@ -198,13 +243,25 @@ class AppState extends ChangeNotifier {
       'change': p.change,
       'refund': p.refund,
       'payments': {'deposit': p.deposit, 'cash': p.cash, 'cashless': p.cashless},
-      'customer': '',
+      'customer': cart['customer'] ?? '',
+      'reservationId': cart['reservationId'],
       'void': false,
     };
     final n = await store.makeNo('seq');
     sale['no'] = n.no;
     sale['noLabel'] = n.noLabel;
     await store.put('sales', sale); // ここで保存が終わる
+    final rid = cart['reservationId'];
+    if (rid != null) {
+      final r = reservations.where((x) => x['id'] == rid);
+      if (r.isNotEmpty) {
+        r.first['status'] = 'done';
+        r.first['saleId'] = sale['id'];
+        r.first['doneAt'] = sale['at'];
+        await store.put('reservations', r.first);
+      }
+    }
+    Sound.play(Sfx.done);
     cart = _emptyCart();
     await store.setKv('cart', jsonEncode(cart));
     notifyListeners();
@@ -217,6 +274,101 @@ class AppState extends ChangeNotifier {
     await store.put('sales', sale);
     log('void', '取引No.${sale['noLabel'] ?? sale['no']} を取消 ${yen((sale['totals'] as Map)['total'] as num)}');
     notifyListeners();
+  }
+
+  // ---------------- 予約・取り置き ----------------
+  List<Json> get reservations => store.all('reservations');
+
+  /// 予約を保存（新規は番号を付ける）
+  Future<Json> saveReservation(Json r) async {
+    final isNew = r['id'] == null;
+    if (isNew) {
+      r['id'] = Store.newId('R');
+      final n = await store.makeNo('rseq');
+      r['no'] = n.no;
+      r['noLabel'] = n.noLabel;
+      r['createdAt'] = DateTime.now().toUtc().toIso8601String();
+      r['status'] ??= 'reserved';
+    }
+    await store.put('reservations', r);
+    log('reservation', '予約No.${r['noLabel']} ${r['name']} 様（${channelLabels[r['channel']] ?? ''}）を${isNew ? '登録' : '変更'}');
+    notifyListeners();
+    return r;
+  }
+
+  Future<void> toggleReady(Json r) async {
+    r['status'] = r['status'] == 'ready' ? 'reserved' : 'ready';
+    await store.put('reservations', r);
+    notifyListeners();
+  }
+
+  /// 予約の取消。refund：前受金を返金する
+  Future<void> cancelReservation(Json r, {bool refund = false}) async {
+    r['status'] = 'cancelled';
+    r['cancelledAt'] = DateTime.now().toUtc().toIso8601String();
+    if (refund && ((r['deposit'] ?? 0) as num) > 0) {
+      r['depositRefundDate'] = localDate(DateTime.now());
+      r['refundDev'] = settings['deviceCode'] ?? '';
+    }
+    await store.put('reservations', r);
+    log('reservation', '予約No.${r['noLabel']} ${r['name']} 様を取消${refund ? '（前受金を返金）' : ''}');
+    notifyListeners();
+  }
+
+  /// 予約をレジに読み込む（価格は会計時の価格。グラム売りは予定重量で、量り直す）
+  /// 同じ予約を保留中なら、保留から呼び出す
+  Future<void> loadReservation(Json r) async {
+    final held = holds.where((h) => (h['cart'] as Json)['reservationId'] == r['id']);
+    if (held.isNotEmpty) {
+      await recallHold(held.first['id'] as String);
+      return;
+    }
+    cart = {
+      'lines': [
+        for (final it in (r['items'] as List).cast<Json>())
+          () {
+            final pr = products.where((p) => p['id'] == it['productId']);
+            final l = <String, dynamic>{
+              'key': 'L${_lineSeq++}',
+              'productId': it['productId'],
+              'name': it['name'],
+              'unit': it['unit'],
+              'price': pr.isNotEmpty && it['unit'] != 'open' ? pr.first['price'] : it['price'],
+              'qty': it['qty'],
+              'taxRate': pr.isNotEmpty ? pr.first['taxRate'] : (it['taxRate'] ?? 8),
+              'discount': null,
+            };
+            if (it['unit'] == 'g') l['estimated'] = true;
+            return l;
+          }()
+      ],
+      'discount': null,
+      'reservationId': r['id'],
+      'reservationNo': r['noLabel'] ?? '${r['no']}',
+      'customer': r['name'],
+      'deposit': r['depositRefundDate'] != null ? 0 : ((r['deposit'] ?? 0) as num).toInt(),
+    };
+    _saveCart();
+  }
+
+  /// カートの予約が、すでに会計済み・取消なら、予約とのつながり（前受金）を外す。外したら true
+  bool unlinkStaleReservation() {
+    final rid = cart['reservationId'];
+    if (rid == null) return false;
+    final r = reservations.where((x) => x['id'] == rid);
+    if (r.isNotEmpty && isActiveReservation(r.first)) return false;
+    for (final k in ['reservationId', 'reservationNo', 'customer', 'deposit']) {
+      cart.remove(k);
+    }
+    _saveCart();
+    return true;
+  }
+
+  /// 量り直したら「予定重量」の印を外す
+  void markWeighed(String key) {
+    final l = lines.firstWhere((x) => x['key'] == key);
+    l.remove('estimated');
+    _saveCart();
   }
 
   // ---------------- 商品・設定 ----------------
@@ -314,6 +466,7 @@ class AppState extends ChangeNotifier {
         : await derive(password, 'dummy-salt').then((_) => false); // IDが違うときも同じだけ時間をかける
     if (!ok) {
       await _addFail();
+      Sound.play(Sfx.error);
       log('admin-fail', 'ID「$nid」でログインに失敗');
       return 'IDかパスワードが違います。';
     }

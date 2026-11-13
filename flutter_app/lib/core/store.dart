@@ -150,7 +150,7 @@ class Store {
   final Map<String, List<Json>> _docs = {};
   final Map<String, String> _kvCache = {};
 
-  static const collections = ['sales', 'logs', 'cashmoves'];
+  static const collections = ['sales', 'logs', 'cashmoves', 'reservations'];
 
   Future<void> load() async {
     final kv = await backend.loadKv();

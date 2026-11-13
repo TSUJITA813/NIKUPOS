@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/app_state.dart';
+import '../core/sound.dart';
 
 const accent = Color(0xFFB8452A);
 const ink = Color(0xFF2B2522);
@@ -89,6 +90,53 @@ Future<bool> confirmDialog(BuildContext context, String msg, {String ok = 'OK', 
   return r == true;
 }
 
+/// 「元に戻す」ボタン付きの知らせ（4秒）。知らせの外は触っても下の画面が使える
+void undoToast(BuildContext context, String msg, VoidCallback onUndo) {
+  final overlay = Overlay.maybeOf(context, rootOverlay: true);
+  if (overlay == null) return;
+  _toastTimer?.cancel();
+  _toastEntry?.remove();
+  late final OverlayEntry entry;
+  void close() {
+    if (_toastEntry == entry) {
+      entry.remove();
+      _toastEntry = null;
+    }
+  }
+  entry = OverlayEntry(
+    builder: (c) => Positioned(
+      left: 16,
+      right: 16,
+      top: MediaQuery.paddingOf(c).top + 64,
+      child: Center(
+        child: Material(
+          key: const ValueKey('undoToast'),
+          color: const Color(0xEE2B2522),
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 16, right: 4),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: Text(msg, style: const TextStyle(color: Colors.white, fontSize: 15))),
+              TextButton(
+                key: const ValueKey('undoBtn'),
+                onPressed: () {
+                  _toastTimer?.cancel();
+                  close();
+                  onUndo();
+                },
+                child: const Text('元に戻す', style: TextStyle(color: Color(0xFFFFD27A), fontWeight: FontWeight.w800)),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    ),
+  );
+  _toastEntry = entry;
+  overlay.insert(entry);
+  _toastTimer = Timer(const Duration(seconds: 4), close);
+}
+
 /// キー入力を数字の文字列に反映（Web版の applyKey と同じ）
 String applyKey(String val, String key, int maxLen) {
   if (key == 'BS') return val.isEmpty ? '' : val.substring(0, val.length - 1);
@@ -98,35 +146,71 @@ String applyKey(String val, String key, int maxLen) {
 }
 
 /// テンキー
+///  7 8 9 | ⌫（1字消す）
+///  4 5 6 |
+///  1 2 3 | C（全部消す）
+///  0   00|
 class Keypad extends StatelessWidget {
   final void Function(String key) onKey;
   const Keypad({super.key, required this.onKey});
+
+  Widget _btn(BuildContext context, String k, {Widget? child, Color? bgColor, Color? fg}) => OutlinedButton(
+        key: ValueKey('key-$k'),
+        style: OutlinedButton.styleFrom(
+          backgroundColor: bgColor ?? const Color(0xFFF8F6F4),
+          foregroundColor: fg ?? ink,
+          side: const BorderSide(color: line),
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          textStyle: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 24, fontWeight: FontWeight.w700),
+        ),
+        onPressed: () {
+          Sound.play(Sfx.key);
+          onKey(k);
+        },
+        child: child ?? Text(k),
+      );
+
   @override
   Widget build(BuildContext context) {
-    const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '00', '0', 'BS'];
-    return GridView.count(
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 8,
-      crossAxisSpacing: 8,
-      childAspectRatio: 2.1,
-      children: [
-        for (final k in keys)
-          OutlinedButton(
-            key: ValueKey('key-$k'),
-            style: OutlinedButton.styleFrom(
-              backgroundColor: const Color(0xFFF8F6F4),
-              foregroundColor: ink,
-              side: const BorderSide(color: line),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              textStyle: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 24, fontWeight: FontWeight.w700),
-            ),
-            onPressed: () => onKey(k),
-            child: k == 'BS' ? const Icon(Icons.backspace_outlined) : Text(k),
-          ),
-      ],
-    );
+    const gap = 8.0;
+    return LayoutBuilder(builder: (c, box) {
+      final colW = (box.maxWidth - gap * 3) / 4;
+      final keyH = (colW / 1.6).clamp(44.0, 64.0);
+      Widget cell(String k, {int flex = 1}) => Expanded(flex: flex, child: SizedBox(height: keyH, child: _btn(context, k)));
+      Widget row(List<Widget> keys) => Row(children: [for (var i = 0; i < keys.length; i++) ...[if (i > 0) const SizedBox(width: gap), keys[i]]]);
+      final digits = Column(children: [
+        row([cell('7'), cell('8'), cell('9')]),
+        const SizedBox(height: gap),
+        row([cell('4'), cell('5'), cell('6')]),
+        const SizedBox(height: gap),
+        row([cell('1'), cell('2'), cell('3')]),
+        const SizedBox(height: gap),
+        row([cell('0', flex: 2), cell('00')]),
+      ]);
+      Widget side(String k, IconData icon, String label, Color bgColor, Color fg) => SizedBox(
+            height: keyH * 2 + gap,
+            child: _btn(context, k,
+                bgColor: bgColor,
+                fg: fg,
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(icon, size: 26),
+                  const SizedBox(height: 2),
+                  FittedBox(child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700))),
+                ])),
+          );
+      return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(flex: 3, child: digits),
+        const SizedBox(width: gap),
+        Expanded(
+          child: Column(children: [
+            side('BS', Icons.backspace_outlined, '1字消す', const Color(0xFFF1ECE8), ink),
+            const SizedBox(height: gap),
+            side('C', Icons.clear, '全部消す', const Color(0xFFF7E3DC), danger),
+          ]),
+        ),
+      ]);
+    });
   }
 }
 

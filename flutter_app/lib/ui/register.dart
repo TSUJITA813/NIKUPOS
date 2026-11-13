@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../core/app_state.dart';
 import '../core/calc.dart';
 import '../core/receipt.dart';
+import '../core/sound.dart';
 import 'common.dart';
 
 String priceLabel(Json p) {
@@ -201,7 +202,7 @@ class MiniCartBar extends StatelessWidget {
                     Text('${t.count}点', style: const TextStyle(color: muted)),
                     if (n > 0) Text('　保留$n件', style: const TextStyle(color: accent, fontWeight: FontWeight.w700)),
                     const Spacer(),
-                    Text(yen(t.total), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                    Text(yen(s.cartDeposit > 0 ? (t.total - s.cartDeposit).clamp(0, 1 << 31) : t.total), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
                   ]),
                   const Text('カートを見る ▲', style: TextStyle(color: accent, fontSize: 13)),
                 ]),
@@ -245,10 +246,20 @@ class CartPanel extends StatelessWidget {
       child: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-          child: Row(children: [
-            const Text('お会計', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-            const Spacer(),
-            if (inSheet) TextButton(onPressed: () => Navigator.pop(context), child: const Text('閉じる ▼')),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Text('お会計', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              if (!s.cartEmpty) const Flexible(child: Text('　横にスライドで取消', style: TextStyle(color: muted, fontSize: 12), overflow: TextOverflow.ellipsis)),
+              const Spacer(),
+              if (inSheet) TextButton(onPressed: () => Navigator.pop(context), child: const Text('閉じる ▼')),
+            ]),
+            if (s.cart['reservationId'] != null)
+              Chip(
+                key: const ValueKey('cartResv'),
+                visualDensity: VisualDensity.compact,
+                avatar: const Icon(Icons.event_note, size: 16),
+                label: Text('予約No.${s.cart['reservationNo']} ${s.cart['customer']} 様', overflow: TextOverflow.ellipsis),
+              ),
           ]),
         ),
         Expanded(
@@ -272,6 +283,10 @@ class CartPanel extends StatelessWidget {
               const Spacer(),
               Text(yen(t.total), key: const ValueKey('cartTotal'), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
             ]),
+            if (s.cartDeposit > 0) ...[
+              _sumRow('前受金', '-${numStr(s.cartDeposit)}', color: okColor),
+              _sumRow('お支払い残額', yen((t.total - s.cartDeposit).clamp(0, 1 << 31))),
+            ],
           ]),
         ),
         Padding(
@@ -338,12 +353,43 @@ class CartPanel extends StatelessWidget {
             ? '${yen(l['price'] as num)}/100g × ${numStr(l['qty'] as num)}g'
             : '${yen(l['price'] as num)} × ${l['qty']}';
     final disc = lineDiscount(l, s.rounding);
-    return ListTile(
-      dense: true,
-      title: Text(l['name'] as String, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-      subtitle: Text(detail + (disc != 0 ? '　${discLabel(l['discount'] as Json?)} -${numStr(disc)}' : '')),
-      trailing: Text(yen(lineAmount(l, s.rounding)), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-      onTap: () => lineDialog(context, l),
+    Widget bgBox(Alignment a) => Container(
+          color: danger,
+          alignment: a,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.delete_outline, color: Colors.white),
+            SizedBox(width: 6),
+            Text('取り消す', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          ]),
+        );
+    // 左右どちらに横スライドしても、カートから取り消せる（すぐに「元に戻す」もできる）
+    return Dismissible(
+      key: ValueKey('line-${l['key']}'),
+      background: bgBox(Alignment.centerLeft),
+      secondaryBackground: bgBox(Alignment.centerRight),
+      onDismissed: (_) {
+        final r = s.removeLine(l['key'] as String);
+        if (r != null) undoToast(context, '${l['name']} を取り消しました', () => s.restoreLine(r.line, r.index));
+      },
+      child: ListTile(
+        dense: true,
+        title: Text(l['name'] as String, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        subtitle: Text.rich(TextSpan(children: [
+          TextSpan(text: detail + (disc != 0 ? '　${discLabel(l['discount'] as Json?)} -${numStr(disc)}' : '')),
+          if (l['estimated'] == true) const TextSpan(text: '　予定重量・要計量', style: TextStyle(color: danger, fontWeight: FontWeight.w700)),
+        ])),
+        trailing: Text(yen(lineAmount(l, s.rounding)), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        onTap: () async {
+          if (l['estimated'] == true) {
+            // 予約の予定重量 → すぐに実際の重さを入れる
+            final g = await numberDialog(context, title: l['name'] as String, label: '実際の重さ', unit: 'g', note: '予定 ${numStr(l['qty'] as num)}g・はかりの値を入力', price: (l['price'] as num).toInt());
+            if (g != null && g > 0) s.updateLine(l['key'] as String, qty: g);
+          } else if (context.mounted) {
+            lineDialog(context, l);
+          }
+        },
+      ),
     );
   }
 }
@@ -404,6 +450,7 @@ class KeyInput extends StatelessWidget {
           final ch = e.character;
           if (ch != null && RegExp(r'^[0-9]$').hasMatch(ch)) { onKey(ch); return KeyEventResult.handled; }
           if (e.logicalKey == LogicalKeyboardKey.backspace) { onKey('BS'); return KeyEventResult.handled; }
+          if (e.logicalKey == LogicalKeyboardKey.delete) { onKey('C'); return KeyEventResult.handled; }
           if (e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter) { onEnter(); return KeyEventResult.handled; }
           return KeyEventResult.ignored;
         },
@@ -561,6 +608,20 @@ Widget _holdTile(BuildContext c, BuildContext context, AppState s, Json h, int i
 Future<void> openPayDialog(BuildContext context) async {
   final s = AppScope.read(context);
   if (s.cartEmpty) return;
+  // 予約が別の端末などで会計・取消されていたら、予約とのつながり（前受金）を外す
+  if (s.unlinkStaleReservation()) {
+    Sound.play(Sfx.error);
+    await showDialog<void>(context: context, builder: (c) => AlertDialog(
+      content: const Text('この予約は、すでに会計または取消されています。予約とは別の、ふつうの会計として扱います（前受金は差し引きません）。'),
+      actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('OK'))],
+    ));
+    return;
+  }
+  if (s.lines.any((l) => l['estimated'] == true) && context.mounted &&
+      !await confirmDialog(context, '予約の予定重量のままの商品があります。このまま会計しますか？\n（実際の重さに直すには、カートの商品をタップ）', ok: 'このまま会計')) {
+    return;
+  }
+  if (!context.mounted) return;
   final total = s.cartTotals.total;
   final tablet = useTabletLayout(context, s);
   final sale = await showDialog<Json>(
@@ -586,14 +647,18 @@ class _PayPanelState extends State<PayPanel> {
   String val = '', clVal = '';
   String target = 'cl';
   bool saving = false;
+  int deposit = 0; // 予約の前受金
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    ctype = AppScope.read(context).cashlessTypes.first;
+    final s = AppScope.read(context);
+    ctype = s.cashlessTypes.first;
+    deposit = s.cartDeposit;
   }
 
-  Payment get pay => payments(widget.total, 0, method, int.tryParse(val) ?? 0, int.tryParse(clVal) ?? 0);
+  Payment get pay => payments(widget.total, deposit, method, int.tryParse(val) ?? 0, int.tryParse(clVal) ?? 0);
+  bool get settledByDeposit => widget.total - deposit <= 0;
 
   void key(String k) => setState(() {
         if (method == 'split' && target == 'cl') {
@@ -604,6 +669,7 @@ class _PayPanelState extends State<PayPanel> {
       });
 
   bool get canPay {
+    if (settledByDeposit) return true;
     final p = pay;
     if (p.change < 0) return false;
     if (method == 'split' && p.cashless == 0) return false;
@@ -635,7 +701,15 @@ class _PayPanelState extends State<PayPanel> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('戻る')),
         ]),
         body: SafeArea(
-          child: ListView(padding: const EdgeInsets.all(16), children: [
+          child: settledByDeposit
+              ? ListView(padding: const EdgeInsets.all(16), children: [
+                  const Text('前受金で精算', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  AmountDisplay('合計', yen(widget.total)),
+                  AmountDisplay('前受金', yen(deposit), light: true),
+                  AmountDisplay('ご返金（現金）', yen(p.refund), valueColor: const Color(0xFFFFD27A)),
+                ])
+              : ListView(padding: const EdgeInsets.all(16), children: [
             SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'cash', label: Text('現金')),
@@ -655,7 +729,11 @@ class _PayPanelState extends State<PayPanel> {
               ]),
             ],
             const SizedBox(height: 8),
-            AmountDisplay('合計', yen(widget.total)),
+            if (deposit > 0) ...[
+              AmountDisplay('合計 ${yen(widget.total)}／前受金', '-${numStr(deposit)}', light: true),
+              AmountDisplay('お支払い残額', yen(p.due)),
+            ] else
+              AmountDisplay('合計', yen(widget.total)),
             if (split) ...[
               AmountDisplay('$ctypeで', clVal.isEmpty ? '金額を入力' : yen(p.cashless), light: true, highlight: target == 'cl', onTap: () => setState(() => target = 'cl')),
               AmountDisplay('残りを現金で', yen(p.cash), light: true),

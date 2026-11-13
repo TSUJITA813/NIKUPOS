@@ -8,6 +8,7 @@ import '../core/app_state.dart';
 import '../core/auth.dart';
 import '../core/calc.dart';
 import '../core/profit.dart';
+import '../core/sound.dart';
 import 'common.dart';
 
 class AdminPage extends StatelessWidget {
@@ -696,7 +697,7 @@ class _SettingsAdminState extends State<SettingsAdmin> {
     final st = AppScope.read(context).settings;
     String sv(String k) => (st[k] ?? '').toString();
     f = {
-      for (final k in ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'deviceCode']) k: TextEditingController(text: sv(k)),
+      for (final k in ['storeName', 'address', 'tel', 'fax', 'invoiceNo', 'footer', 'deviceCode']) k: TextEditingController(text: sv(k)),
       'categories': TextEditingController(text: ((st['categories'] as List?) ?? const []).join(',')),
       'cashlessTypes': TextEditingController(text: ((st['cashlessTypes'] as List?) ?? const []).join(',')),
     };
@@ -714,7 +715,7 @@ class _SettingsAdminState extends State<SettingsAdmin> {
 
   Future<void> save() async {
     final s = AppScope.read(context);
-    for (final k in ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'deviceCode']) {
+    for (final k in ['storeName', 'address', 'tel', 'fax', 'invoiceNo', 'footer', 'deviceCode']) {
       s.settings[k] = f[k]!.text.trim();
     }
     final cats = split(f['categories']!.text);
@@ -756,10 +757,43 @@ class _SettingsAdminState extends State<SettingsAdmin> {
                   ),
               ]),
             ),
+            h2('操作音（この端末）'),
+            SwitchListTile(
+              key: const ValueKey('soundOn'),
+              title: const Text('操作音を鳴らす'),
+              subtitle: const Text('テンキー・商品の追加・取消・保留・会計完了・エラーで音が鳴ります。上の 🔊 ボタンでもすぐ切り替えられます。'),
+              value: s.soundOn,
+              onChanged: (v) => s.setSound(on: v),
+            ),
+            Row(children: [
+              const SizedBox(width: 16),
+              const Text('音量'),
+              Expanded(
+                child: Slider(
+                  key: const ValueKey('soundVol'),
+                  value: s.soundVolume,
+                  divisions: 10,
+                  label: '${(s.soundVolume * 100).round()}%',
+                  onChanged: s.soundOn ? (v) => s.setSound(volume: v) : null,
+                ),
+              ),
+              OutlinedButton(
+                onPressed: s.soundOn
+                    ? () async {
+                        for (final x in [Sfx.key, Sfx.add, Sfx.done]) {
+                          Sound.play(x);
+                          await Future<void>.delayed(const Duration(milliseconds: 450));
+                        }
+                      }
+                    : null,
+                child: const Text('試しに鳴らす'),
+              ),
+            ]),
             h2('店舗・レシート'),
             field('storeName', '店名'),
             field('address', '住所'),
             field('tel', '電話番号'),
+            field('fax', 'FAX番号（FAX注文用紙・予約確認書に載せます）'),
             field('invoiceNo', 'インボイス登録番号', hint: 'T1234567890123'),
             field('footer', 'レシート末尾メッセージ', lines: 2),
             field('categories', '商品カテゴリ（カンマ区切り）'),
