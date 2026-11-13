@@ -254,10 +254,14 @@
     draw();
   }
 
-  // ---------- 操作ログ（売上タブ） ----------
+  // ---------- 操作ログ（管理画面） ----------
   var LABEL = {
     login: 'ログイン', logout: 'ログアウト', approve: '承認', 'void': '取消', 'return': '返品', discount: '値引き', cashmove: '入出金',
-    'cashmove-delete': '入出金の削除', closing: '精算', settings: '設定', receipt: '領収書', product: '商品', order: '発注'
+    'cashmove-delete': '入出金の削除', closing: '精算', settings: '設定', receipt: '領収書', product: '商品', order: '発注',
+    drawer: '引き出し', hold: '保留', 'export': '書き出し',
+    'admin-login': '管理画面にログイン', 'admin-logout': '管理画面からログアウト', 'admin-fail': '管理画面のログイン失敗',
+    'admin-register': '管理者の登録', 'admin-reset': 'パスワードの再設定', 'admin-add': '管理者の追加', 'admin-delete': '管理者の削除',
+    'admin-password': 'パスワードの変更', 'admin-code': '回復用コードの作り直し'
   };
   var logDate = POS.localDate(new Date());
   POS.salesTabs.log = function (box) {

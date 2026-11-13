@@ -247,7 +247,7 @@
   /** XML を送る。成功で resolve、失敗で Error(message) を reject */
   function send(cfg, xml) {
     var job = queue.then(function () {
-      if (!normalizeHost(cfg.host)) throw new Error('プリンターのIPアドレスが設定されていません（設定 → レシートプリンター）');
+      if (!normalizeHost(cfg.host)) throw new Error('プリンターのIPアドレスが設定されていません（管理 → 設定 → レシートプリンター）');
       var order = protoOrder(cfg);
       var i = 0;
       function attempt() {
@@ -264,7 +264,7 @@
           if (i < order.length) return attempt();
           if (e.timeout) throw new Error('プリンターの応答がありません。電源と、同じWi-Fi・LANにつながっているかを確認してください');
           throw new Error(isIOS() && order.indexOf('https') >= 0
-            ? 'プリンターにつながりません。IPアドレス・同じWi-Fiか・証明書の許可（設定 → レシートプリンター）を確認してください'
+            ? 'プリンターにつながりません。IPアドレス・同じWi-Fiか・証明書の許可（管理 → 設定 → レシートプリンター）を確認してください'
             : 'プリンターにつながりません。IPアドレスと、同じWi-Fi・LANにつながっているかを確認してください');
         });
       }

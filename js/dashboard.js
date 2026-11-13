@@ -47,7 +47,7 @@
     var r = Profit.compute(d, p, { fixedUntil: current ? today : null });
     var prev = Profit.previous(p, now);
     var b = Profit.compute(d, prev.period, { until: prev.until, fixedUntil: prev.fixedUntil });
-    var gated = POS.needsApproval('profit') && !unlocked;
+    var gated = POS.needsApproval('profit') && !unlocked && !POS.isAdmin();
     var cmpLabel = shortCmp(p);
 
     var h = '<div class="toolbar dash-bar"><div class="seg compact">' + [['day', '今日'], ['week', '今週'], ['month', '今月'], ['year', '今年']].map(function (x) {
@@ -118,12 +118,10 @@
     clearInterval(timer);
     if (current) {
       timer = setInterval(function () {
-        var pane = $('salesPane');
-        if (!$('view-sales').classList.contains('active') || pane.hidden || !pane.querySelector('.dash-bar') || !$('modal').hidden) {
-          if (!pane.querySelector('.dash-bar')) clearInterval(timer);
-          return;
-        }
-        POS.salesTabs.dash(pane);
+        // 画面が切り替わっていたら止める。入力中（モーダル）や画面が見えていないときは待つ
+        if (!box.isConnected || !box.querySelector('.dash-bar')) { clearInterval(timer); return; }
+        if (box.offsetParent === null || !$('modal').hidden) return;
+        POS.salesTabs.dash(box);
       }, 30000);
     }
   };
@@ -133,7 +131,7 @@
     if (r.noCostList.length) {
       h += '<p class="note">原価が登録されている売上は ' + pct(r.coverage) + ' です。原価が未登録の商品：' +
         esc(r.noCostList.slice(0, 8).join('、')) + (r.noCostList.length > 8 ? ' ほか' : '') +
-        '。「商品」タブで原価を入れる（入荷で仕入単価を入れると自動で入ります）と、利益が正確になります。</p>';
+        '。「商品・価格」で原価を入れる（入荷で仕入単価を入れると自動で入ります）と、利益が正確になります。</p>';
     }
     h += '<p class="note">利益の目安は、粗利から経費（レジの出金。仕入高・事業主貸・預金への入金は除く）と固定費を引いたものです。' +
       'レジを通さない支払い（口座引き落としの光熱費など）は「固定費の設定」に月額で入れてください。正式な決算は会計ソフトで行ってください。</p>';

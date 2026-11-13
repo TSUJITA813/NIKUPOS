@@ -596,3 +596,18 @@ table.pl td.r { white-space: nowrap; }
 .pl-note { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
 .dash-cmpnote { margin: -4px 0 8px; }
 .dash-cards .card .v .note { font-size: 13px; font-weight: 500; }
+
+/* 管理画面 */
+.admin-nav { background: #3a2f2a; position: sticky; top: 0; z-index: 5; }
+.admin-nav-inner { display: flex; align-items: center; gap: 6px; padding: 6px 12px; overflow-x: auto; scrollbar-width: none; max-width: 1200px; margin: 0 auto; }
+.admin-nav-inner::-webkit-scrollbar { display: none; }
+.admin-nav .btn { background: transparent; color: #f3ebe6; border-color: rgba(255, 255, 255, .25); white-space: nowrap; }
+.admin-nav .btn.on { background: #f3ebe6; color: #3a2f2a; border-color: #f3ebe6; }
+.admin-who { color: #cbbfb8; font-size: 13px; white-space: nowrap; }
+.auth-box { max-width: 420px; margin: 24px auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+.auth-box h2 { margin-top: 0; }
+.auth-msg { color: var(--danger); min-height: 1.4em; margin: 0; font-size: 14px; }
+.auth-msg:empty { min-height: 0; }
+.linkish { background: none; border: 0; color: var(--accent); text-decoration: underline; padding: 4px 0; font: inherit; cursor: pointer; }
+.recovery-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 26px; font-weight: 800; letter-spacing: .08em; text-align: center; padding: 14px; margin: 10px 0; border: 2px dashed var(--accent); border-radius: 10px; background: var(--accent-soft); user-select: all; }
+.tab[data-view="admin"] { white-space: nowrap; }

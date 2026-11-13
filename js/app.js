@@ -73,8 +73,11 @@ Store.init().then(function () {
   });
 
   function showView(name) {
+    // 管理の画面（商品・設定など）は、管理者のログインが必要（admin.js）
+    if (POS.guardView) name = POS.guardView(name);
     try { localStorage.setItem('nikupos.lastView', name); } catch (e) { /* noop */ }
-    document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === name); });
+    var tabName = POS.adminViews && POS.adminViews.indexOf(name) >= 0 ? 'admin' : name;
+    document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.view === tabName); });
     document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
     if (name === 'register') renderRegister();
     if (name === 'reservations') renderReservations();
@@ -197,7 +200,7 @@ Store.init().then(function () {
         (promo ? '<span class="p-promo">' + esc(promo) + '</span>' : '') +
         '<span class="p-price">' + priceLabel(p) + (p.taxRate === 10 ? '（10%）' : '') + '</span></button>';
     }).join('') : searchQ ? '<p class="note">「' + esc(searchQ) + '」に合う商品はありません。</p>'
-      : '<p class="note">商品がありません。「商品」タブから登録してください。</p>';
+      : '<p class="note">商品がありません。「管理」→「商品・価格」から登録してください。</p>';
   }
   $('prodSearch').addEventListener('input', function () { searchQ = this.value.trim(); renderGrid(); });
   $('prodSearch').addEventListener('search', function () { searchQ = this.value.trim(); renderGrid(); });
@@ -1139,7 +1142,7 @@ Store.init().then(function () {
     $('salesSummary').innerHTML = h;
   }
   // 売上タブの中の切り替え（日別・レジ締め・入出金・分析・操作ログ）
-  var salesTab = 'dash';
+  var salesTab = 'day';
   $('salesTabs').addEventListener('click', function (e) {
     var b = e.target.closest('[data-stab]');
     if (!b) return;
@@ -2331,7 +2334,9 @@ Store.init().then(function () {
     currentStaff: function () { return null; },
     addBadge: function (f) { badgeFns.push(f); },
     refreshBadges: refreshBadges,
-    showView: showView
+    showView: showView,
+    openAdmin: function () { showView('admin'); },
+    isAdmin: function () { return false; }
   };
   (window.NIKUPOS_MODULES || []).forEach(function (init) { init(POS); });
 
@@ -2477,10 +2482,12 @@ Store.init().then(function () {
   var lastView = null;
   try { lastView = localStorage.getItem('nikupos.lastView'); } catch (e) { /* noop */ }
   // パソコンの管理画面用：…/#dashboard で売上のダッシュボードを開く（#sales・#day なども可）
-  var HASH_VIEWS = { dashboard: ['sales', 'dash'], sales: ['sales', 'dash'], day: ['sales', 'day'], analysis: ['sales', 'analysis'], products: ['products'], inventory: ['inventory'], wholesale: ['wholesale'], settings: ['settings'] };
+  var HASH_VIEWS = { admin: ['admin', 'dash'], dashboard: ['admin', 'dash'], analysis: ['admin', 'analysis'], log: ['admin', 'log'], sales: ['sales', 'day'], day: ['sales', 'day'],
+    products: ['admin', 'products'], settings: ['admin', 'settings'], inventory: ['inventory'], wholesale: ['wholesale'], reservations: ['reservations'], register: ['register'] };
   function openHash() {
     var hv = HASH_VIEWS[(location.hash || '').replace('#', '')];
     if (!hv) return false;
+    if (hv[0] === 'admin') { POS.openAdmin(hv[1]); return true; }
     if (hv[1]) salesTab = hv[1];
     showView(hv[0]);
     return true;

@@ -76,7 +76,7 @@
     drawerAuto: true
   };
   // 全端末で共通にする設定（それ以外はこの端末だけの設定）
-  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct', 'cashlessTypes', 'promos', 'staff', 'permissions', 'fixedCosts'];
+  var SHARED_SETTINGS = ['storeName', 'address', 'tel', 'invoiceNo', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct', 'cashlessTypes', 'promos', 'staff', 'permissions', 'fixedCosts', 'admins', 'adminRecovery'];
 
   // ---------- localStorage ----------
   function read(key, fallback) {
@@ -548,6 +548,15 @@
           }
         } else if (d.col === 'config' && d.id === 'shared' && d.data) {
           settings = settings || Store.getSettings();
+          // クラウドにつなぐ前にこの端末だけで登録した管理者は、お店の管理者（クラウド側）があればそちらに合わせる
+          if (settings.adminsLocal) {
+            if (d.data.admins && d.data.admins.length) {
+              settings.admins = d.data.admins;
+              settings.adminRecovery = d.data.adminRecovery;
+              n++;
+            }
+            delete settings.adminsLocal;
+          }
           if ((settings._sharedM || '') > (d.data._m || '')) markStale('config', 'shared');
           else if ((settings._sharedM || '') < (d.data._m || '')) {
             SHARED_SETTINGS.forEach(function (k) { if (d.data[k] !== undefined) settings[k] = d.data[k]; });

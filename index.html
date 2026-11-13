@@ -25,13 +25,13 @@
         <button class="tab" data-view="wholesale">卸<span class="tab-badge" id="wsBadge" hidden></span></button>
         <button class="tab" data-view="inventory">在庫<span class="tab-badge warn" id="invBadge" hidden></span></button>
         <button class="tab" data-view="sales">売上</button>
-        <button class="tab" data-view="products">商品</button>
-        <button class="tab" data-view="settings">設定</button>
+        <button class="tab" data-view="admin">🔒管理</button>
       </nav>
       <button class="staff-chip" id="staffChip" hidden aria-label="担当者の切り替え"></button>
       <button class="sync-dot" id="syncDot" hidden aria-label="同期の状態"></button>
       <div class="clock" id="clock"></div>
     </header>
+    <nav class="admin-nav" id="adminNav" hidden></nav>
 
     <!-- レジ -->
     <main id="view-register" class="view active">
@@ -104,14 +104,11 @@
     <main id="view-sales" class="view">
       <div class="page">
         <div class="subtabs" id="salesTabs">
-          <button class="btn on" data-stab="dash">ダッシュボード</button>
-          <button class="btn" data-stab="day">日別の売上</button>
+          <button class="btn on" data-stab="day">日別の売上</button>
           <button class="btn" data-stab="close">レジ締め</button>
           <button class="btn" data-stab="cash">入出金</button>
-          <button class="btn" data-stab="analysis">分析</button>
-          <button class="btn" data-stab="log">操作ログ</button>
         </div>
-        <div id="salesDay" hidden>
+        <div id="salesDay">
         <div class="toolbar">
           <button class="btn small" id="btnPrevDay">◀</button>
           <input type="date" id="salesDate">
@@ -123,8 +120,13 @@
         </div>
         <div id="salesSummary"></div>
         </div>
-        <div id="salesPane"></div>
+        <div id="salesPane" hidden></div>
       </div>
+    </main>
+
+    <!-- 管理（ID・パスワードでログイン） -->
+    <main id="view-admin" class="view">
+      <div class="page" id="adminRoot"></div>
     </main>
 
     <!-- 商品 -->
@@ -215,6 +217,9 @@
           <button class="btn primary" type="submit">保存</button>
         </form>
 
+        <h2>管理者（ID・パスワード）</h2>
+        <div id="adminSettings"></div>
+
         <h2>担当者と権限</h2>
         <div id="staffSettings"></div>
 
@@ -265,6 +270,7 @@
   <script src="js/staff.js"></script>
   <script src="js/analysis.js"></script>
   <script src="js/dashboard.js"></script>
+  <script src="js/admin.js"></script>
   <script src="js/pricelist.js"></script>
   <script src="js/inventory.js"></script>
   <script src="js/wholesale.js"></script>
