@@ -216,4 +216,19 @@ void main() {
     await tapKey(t, 'openCart');
     await shot(t, 'phone_excl_cart');
   }, skip: !on);
+
+  testWidgets('管理の商品一覧', (t) async {
+    await start(t, const Size(390, 844));
+    await t.tap(find.byKey(const ValueKey('nav-管理')));
+    await t.pumpAndSettle();
+    await t.enterText(find.byKey(const ValueKey('authId')), 'tenshu');
+    await t.enterText(find.byKey(const ValueKey('authPw')), 'toriniku2026');
+    await t.enterText(find.byKey(const ValueKey('authPw2')), 'toriniku2026');
+    await t.tap(find.byKey(const ValueKey('authSubmit')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('recoveryOk')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('tab-products')));
+    await shot(t, 'phone_products_admin');
+  }, skip: !on);
 }

@@ -143,4 +143,47 @@ void main() {
     expect(s.settings['priceModeDefault'], 'excl');
     await t.pump(const Duration(seconds: 3));
   });
+
+  Future<void> dragHandle(WidgetTester t, String id, Offset to) async {
+    final from = t.getCenter(find.byKey(ValueKey('phandle-$id')));
+    final g = await t.startGesture(from);
+    await t.pump(const Duration(milliseconds: 50));
+    for (var i = 1; i <= 15; i++) {
+      await g.moveTo(Offset.lerp(from, Offset(from.dx, to.dy), i / 15)!);
+      await t.pump(const Duration(milliseconds: 30));
+    }
+    await g.up();
+    await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await t.pumpAndSettle();
+  }
+
+  testWidgets('管理の商品一覧：≡ を押したまま動かして並べ替え、別のカテゴリへも移せる', (t) async {
+    final s = await boot(t, const Size(1280, 1400));
+    await loginAdmin(t);
+    await t.tap(find.byKey(const ValueKey('tab-products')));
+    await t.pumpAndSettle();
+    final cat0 = s.categories[0];
+    List<String> idsIn(String c) => orderOf(s).where((id) => s.products.firstWhere((p) => p['id'] == id)['category'] == c).toList();
+    final before = idsIn(cat0);
+    // 1番目を3番目の下へ
+    final target = t.getBottomRight(find.byKey(ValueKey('padmin-${before[2]}')));
+    await dragHandle(t, before[0], target - const Offset(0, 5));
+    final after = idsIn(cat0);
+    expect(after.sublist(0, 3), [before[1], before[2], before[0]]);
+    expect(after.sublist(3), before.sublist(3));
+    // 別のカテゴリ（2番目のカテゴリの最初の商品の下）へ
+    final cat1 = s.categories[1];
+    final first1 = idsIn(cat1).first;
+    final moving = after.last;
+    await t.ensureVisible(find.byKey(ValueKey('padmin-$first1')));
+    await t.pumpAndSettle();
+    await t.ensureVisible(find.byKey(ValueKey('phandle-$moving')));
+    await t.pumpAndSettle();
+    final to = t.getBottomRight(find.byKey(ValueKey('padmin-$first1')));
+    await dragHandle(t, moving, to - const Offset(0, 5));
+    expect(s.products.firstWhere((p) => p['id'] == moving)['category'], cat1);
+    expect(idsIn(cat1).sublist(0, 2), [first1, moving]);
+    expect(find.textContaining('に移しました'), findsOneWidget);
+    await t.pump(const Duration(seconds: 3));
+  });
 }

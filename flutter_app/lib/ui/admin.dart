@@ -539,17 +539,31 @@ Future<void> fixedCostsDialog(BuildContext context) async {
 
 // ---------------- 商品・価格 ----------------
 
+/// 商品一覧（カテゴリごと）。右の ≡ を押したまま、または商品を長押しして動かすと並べ替え。
+/// ほかのカテゴリの所へ動かすと、そのカテゴリに移る
 class ProductsAdmin extends StatelessWidget {
   const ProductsAdmin({super.key});
+
+  /// 並び：カテゴリの見出し（product が null）と商品
+  static List<({String cat, Json? product})> entriesOf(AppState s) {
+    final cats = [...s.categories];
+    for (final p in s.products) {
+      final c = (p['category'] ?? '') as String;
+      if (!cats.contains(c)) cats.add(c);
+    }
+    num o(Json p) => (p['order'] ?? 0) as num;
+    return [
+      for (final c in cats) ...[
+        (cat: c, product: null),
+        for (final p in s.products.where((p) => p['category'] == c).toList()..sort((a, b) => o(a).compareTo(o(b)))) (cat: c, product: p),
+      ],
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
-    final cats = s.categories;
-    final list = s.products.toList()
-      ..sort((a, b) {
-        final ca = cats.indexOf(a['category'] as String), cb = cats.indexOf(b['category'] as String);
-        return ca != cb ? ca.compareTo(cb) : ((a['order'] ?? 0) as num).compareTo((b['order'] ?? 0) as num);
-      });
+    final entries = entriesOf(s);
     return Scaffold(
       backgroundColor: Colors.transparent,
       floatingActionButton: FloatingActionButton.extended(
@@ -558,31 +572,76 @@ class ProductsAdmin extends StatelessWidget {
         icon: const Icon(Icons.add),
         label: const Text('商品を追加'),
       ),
-      body: ListView.separated(
+      body: ReorderableListView.builder(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-        itemCount: list.length + 1,
-        separatorBuilder: (_, _) => const SizedBox(height: 6),
+        buildDefaultDragHandles: false,
+        header: const Padding(padding: EdgeInsets.only(bottom: 6), child: _PriceModeBar()),
+        itemCount: entries.length,
+        proxyDecorator: (child, i, anim) => Material(elevation: 6, borderRadius: BorderRadius.circular(10), color: Colors.transparent, child: child),
+        onReorderItem: (from, to) => _move(context, entries, from, to),
         itemBuilder: (c, i) {
-          if (i == 0) return const _PriceModeBar();
-          final p = list[i - 1];
+          final e = entries[i];
+          final p = e.product;
+          if (p == null) {
+            return Padding(
+              key: ValueKey('pcat-${e.cat}'),
+              padding: const EdgeInsets.fromLTRB(4, 10, 4, 4),
+              child: Text(e.cat.isEmpty ? '（カテゴリなし）' : e.cat, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: accent)),
+            );
+          }
           final unit = p['unit'] == 'g' ? '/100g' : '';
           final costUnit = p['unit'] == 'g' ? '/kg' : '/個';
-          return Material(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            child: ListTile(
-              key: ValueKey('padmin-${p['id']}'),
-              leading: CircleAvatar(backgroundColor: colorFrom(p['color'] as String?), radius: 10),
-              title: Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text('${p['category']}・${p['unit'] == 'open' ? '金額入力' : '${yen(p['price'] as num)}$unit'}${p['priceMode'] == 'excl' ? '（税抜き）' : ''}'
-                  '${p['cost'] != null && p['cost'] != 0 ? '・原価 ${yen(p['cost'] as num)}$costUnit' : '・原価 未登録'}${p['taxRate'] == 10 ? '・10%' : ''}'),
-              trailing: const Icon(Icons.edit),
-              onTap: () => productDialog(context, p),
+          return Padding(
+            key: ValueKey('prow-${p['id']}'),
+            padding: const EdgeInsets.only(bottom: 6),
+            child: ReorderableDelayedDragStartListener(
+              index: i,
+              child: Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                child: ListTile(
+                  key: ValueKey('padmin-${p['id']}'),
+                  leading: CircleAvatar(backgroundColor: colorFrom(p['color'] as String?), radius: 10),
+                  title: Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text('${p['unit'] == 'open' ? '金額入力' : '${yen(p['price'] as num)}$unit'}${p['priceMode'] == 'excl' ? '（税抜き）' : ''}'
+                      '${p['cost'] != null && p['cost'] != 0 ? '・原価 ${yen(p['cost'] as num)}$costUnit' : '・原価 未登録'}${p['taxRate'] == 10 ? '・10%' : ''}'),
+                  onTap: () => productDialog(context, p),
+                  trailing: ReorderableDragStartListener(
+                    key: ValueKey('phandle-${p['id']}'),
+                    index: i,
+                    child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.drag_handle, color: muted)),
+                  ),
+                ),
+              ),
             ),
           );
         },
       ),
     );
+  }
+
+  /// to は、動かした商品を抜いたあとの並びでの位置
+  static Future<void> _move(BuildContext context, List<({String cat, Json? product})> entries, int from, int to) async {
+    final s = AppScope.read(context);
+    final e = entries[from];
+    final p = e.product;
+    if (p == null) return; // 見出しは動かさない
+    final list = entries.toList()..removeAt(from);
+    if (to < 1) to = 1; // 一番上の見出しより上には置かない
+    list.insert(to, e);
+    // 置いた場所の上にある見出しのカテゴリに入る
+    var cat = e.cat;
+    for (var i = to; i >= 0; i--) {
+      if (list[i].product == null) {
+        cat = list[i].cat;
+        break;
+      }
+    }
+    final moved = p['category'] != cat;
+    if (moved) p['category'] = cat;
+    final subset = [for (final x in list) if (x.product != null && x.product!['category'] == cat) x.product!];
+    await s.reorderProducts(subset, alsoChanged: moved ? [p['id'] as String] : const []);
+    if (moved && context.mounted) toast(context, '「${p['name']}」を「$cat」に移しました');
   }
 }
 
@@ -597,9 +656,17 @@ class _PriceModeBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
       decoration: BoxDecoration(color: const Color(0xFFFFF8E6), borderRadius: BorderRadius.circular(10), border: Border.all(color: line)),
-      child: Row(children: [
-        Expanded(child: Text('値段の消費税：内税（税込み） $incl件・外税（税抜き） $excl件\n並べ替えは、レジの画面で商品を長押しして動かします。', style: const TextStyle(fontSize: 13))),
-        TextButton(key: const ValueKey('priceModeAll'), onPressed: () => priceModeAllDialog(context), child: const Text('まとめて変える')),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('値段の消費税', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 8),
+          Expanded(child: Text('内税 $incl件・外税 $excl件', style: const TextStyle(fontSize: 13))),
+          TextButton(key: const ValueKey('priceModeAll'), onPressed: () => priceModeAllDialog(context), child: const Text('まとめて変える')),
+        ]),
+        const Padding(
+          padding: EdgeInsets.only(right: 6, bottom: 4),
+          child: Text('並べ替え：右の ≡ を押したまま（または商品を長押しして）動かします。ほかのカテゴリの所へ動かすと、そのカテゴリに移ります。', style: TextStyle(fontSize: 12, color: muted)),
+        ),
       ]),
     );
   }

@@ -474,7 +474,7 @@ class AppState extends ChangeNotifier {
 
   /// 商品の並べ替え。subset：並べ替えた商品（画面に出ていた分）を新しい順で。
   /// ほかの商品の位置は動かさず、subset が占めていた場所に新しい順で入れ直し、全体を 0,1,2… に振り直す
-  Future<void> reorderProducts(List<Json> subset) async {
+  Future<void> reorderProducts(List<Json> subset, {List<String> alsoChanged = const []}) async {
     final idx = {for (var i = 0; i < products.length; i++) products[i]['id']: i};
     final full = products.toList()
       ..sort((a, b) {
@@ -486,11 +486,11 @@ class AppState extends ChangeNotifier {
     for (var i = 0; i < full.length; i++) {
       if (ids.contains(full[i]['id'])) full[i] = subset[k++];
     }
-    final changed = <String>[];
+    final changed = <String>[...alsoChanged];
     for (var i = 0; i < full.length; i++) {
       if (full[i]['order'] != i) {
         full[i]['order'] = i;
-        changed.add(full[i]['id'] as String);
+        if (!changed.contains(full[i]['id'])) changed.add(full[i]['id'] as String);
       }
     }
     if (changed.isEmpty) return;
