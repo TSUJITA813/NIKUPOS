@@ -204,29 +204,34 @@ class AdminHome extends StatelessWidget {
       child: Column(children: [
         Material(
           color: const Color(0xFF3A2F2A),
+          // タブは幅いっぱいに等分（スマホでも「設定」まで押せるように）。ログアウトは右端
           child: Row(children: [
             const Expanded(
               child: TabBar(
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
                 labelColor: Colors.white,
                 unselectedLabelColor: Color(0xFFCBBFB8),
                 indicatorColor: Colors.white,
-                tabs: [Tab(text: 'ダッシュボード'), Tab(text: '商品・価格'), Tab(text: '設定')],
+                labelPadding: EdgeInsets.symmetric(horizontal: 4),
+                tabs: [
+                  Tab(key: ValueKey('tab-dash'), child: FittedBox(child: Text('ダッシュボード'))),
+                  Tab(key: ValueKey('tab-products'), child: FittedBox(child: Text('商品・価格'))),
+                  Tab(key: ValueKey('tab-settings'), child: FittedBox(child: Text('設定'))),
+                ],
               ),
             ),
-            Text(' ${s.adminId} ', style: const TextStyle(color: Color(0xFFCBBFB8), fontSize: 12)),
-            TextButton(
+            IconButton(
               key: const ValueKey('logout'),
+              tooltip: '${s.adminId} をログアウト',
+              icon: const Icon(Icons.logout, color: Colors.white),
               onPressed: () {
                 s.logout();
                 toast(context, '管理画面からログアウトしました');
               },
-              child: const Text('ログアウト', style: TextStyle(color: Colors.white)),
             ),
           ]),
         ),
-        const Expanded(child: TabBarView(children: [Dashboard(), ProductsAdmin(), SettingsAdmin()])),
+        // 横に指を動かしても画面は切り替えない（音量のつまみ・グラフなどを横に動かせるように）。切り替えは上のタブで
+        const Expanded(child: TabBarView(physics: NeverScrollableScrollPhysics(), children: [Dashboard(), ProductsAdmin(), SettingsAdmin()])),
       ]),
     );
   }
@@ -617,10 +622,10 @@ Future<void> productDialog(BuildContext context, Json? p) async {
               ),
               const SizedBox(height: 10),
               const Text('売り方', style: TextStyle(color: muted)),
-              SegmentedButton<String>(
-                segments: const [ButtonSegment(value: 'g', label: Text('グラム売り')), ButtonSegment(value: 'pc', label: Text('個数売り')), ButtonSegment(value: 'open', label: Text('金額入力'))],
-                selected: {d['unit'] as String},
-                onSelectionChanged: (v) => set(() => d['unit'] = v.first),
+              ChoiceBar<String>(
+                options: const [('g', 'グラム売り'), ('pc', '個数売り'), ('open', '金額入力')],
+                value: d['unit'] as String,
+                onChanged: (v) => set(() => d['unit'] = v),
               ),
               if (!open) ...[
                 TextField(key: const ValueKey('pPrice'), controller: price, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: g ? '単価（100gあたり・税込・円）' : '単価（1個あたり・税込・円）')),
@@ -628,10 +633,10 @@ Future<void> productDialog(BuildContext context, Json? p) async {
               ],
               const SizedBox(height: 10),
               const Text('税率', style: TextStyle(color: muted)),
-              SegmentedButton<int>(
-                segments: const [ButtonSegment(value: 8, label: Text('8%（食品）')), ButtonSegment(value: 10, label: Text('10%（レジ袋など）'))],
-                selected: {(d['taxRate'] as num).toInt()},
-                onSelectionChanged: (v) => set(() => d['taxRate'] = v.first),
+              ChoiceBar<int>(
+                options: const [(8, '8%（食品）'), (10, '10%（レジ袋など）')],
+                value: (d['taxRate'] as num).toInt(),
+                onChanged: (v) => set(() => d['taxRate'] = v),
               ),
               const SizedBox(height: 10),
               const Text('ボタンの色', style: TextStyle(color: muted)),
@@ -692,9 +697,14 @@ class SettingsAdmin extends StatefulWidget {
 class _SettingsAdminState extends State<SettingsAdmin> {
   late final Map<String, TextEditingController> f;
 
+  bool _inited = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // 画面を描き直すたびに呼ばれるので、入力欄の準備は最初の1回だけ
+    if (_inited) return;
+    _inited = true;
     final st = AppScope.read(context).settings;
     String sv(String k) => (st[k] ?? '').toString();
     f = {
@@ -759,37 +769,7 @@ class _SettingsAdminState extends State<SettingsAdmin> {
               ]),
             ),
             h2('操作音（この端末）'),
-            SwitchListTile(
-              key: const ValueKey('soundOn'),
-              title: const Text('操作音を鳴らす'),
-              subtitle: const Text('テンキー・商品の追加・取消・保留・会計完了・エラーで音が鳴ります。上の 🔊 ボタンでもすぐ切り替えられます。'),
-              value: s.soundOn,
-              onChanged: (v) => s.setSound(on: v),
-            ),
-            Row(children: [
-              const SizedBox(width: 16),
-              const Text('音量'),
-              Expanded(
-                child: Slider(
-                  key: const ValueKey('soundVol'),
-                  value: s.soundVolume,
-                  divisions: 10,
-                  label: '${(s.soundVolume * 100).round()}%',
-                  onChanged: s.soundOn ? (v) => s.setSound(volume: v) : null,
-                ),
-              ),
-              OutlinedButton(
-                onPressed: s.soundOn
-                    ? () async {
-                        for (final x in [Sfx.key, Sfx.add, Sfx.done]) {
-                          Sound.play(x);
-                          await Future<void>.delayed(const Duration(milliseconds: 450));
-                        }
-                      }
-                    : null,
-                child: const Text('試しに鳴らす'),
-              ),
-            ]),
+            const SoundSettings(),
             h2('店舗・レシート'),
             field('storeName', '店名'),
             field('address', '住所'),
@@ -875,4 +855,89 @@ Future<void> changePasswordDialog(BuildContext context) async {
           ],
         )),
   );
+}
+
+
+/// 操作音の設定（オン・オフ、音量、試しに鳴らす）
+class SoundSettings extends StatelessWidget {
+  const SoundSettings({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    final pct = (s.soundVolume * 100).round();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SwitchListTile(
+        key: const ValueKey('soundOn'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('操作音を鳴らす'),
+        subtitle: const Text('テンキー・商品の追加・取消・保留・会計完了・エラーで音が鳴ります。画面上のスピーカーのボタンでも切り替えられます。'),
+        value: s.soundOn,
+        onChanged: (v) {
+          s.setSound(on: v);
+          if (v) Sound.play(Sfx.add);
+        },
+      ),
+      Row(children: [
+        const Text('音量'),
+        const SizedBox(width: 8),
+        IconButton.outlined(
+          key: const ValueKey('soundDown'),
+          tooltip: '小さく',
+          onPressed: s.soundOn && pct > 10 ? () { s.setSound(volume: ((pct - 10) / 100).clamp(0.1, 1.0)); Sound.play(Sfx.key); } : null,
+          icon: const Icon(Icons.volume_down),
+        ),
+        Expanded(
+          child: Slider(
+            key: const ValueKey('soundVol'),
+            value: s.soundVolume.clamp(0.1, 1.0),
+            min: 0.1,
+            divisions: 9,
+            label: '$pct%',
+            onChanged: s.soundOn ? (v) => s.setSound(volume: v) : null,
+            onChangeEnd: s.soundOn ? (_) => Sound.play(Sfx.key) : null,
+          ),
+        ),
+        IconButton.outlined(
+          key: const ValueKey('soundUp'),
+          tooltip: '大きく',
+          onPressed: s.soundOn && pct < 100 ? () { s.setSound(volume: ((pct + 10) / 100).clamp(0.1, 1.0)); Sound.play(Sfx.key); } : null,
+          icon: const Icon(Icons.volume_up),
+        ),
+        SizedBox(width: 48, child: Text('$pct%', key: const ValueKey('soundPct'), textAlign: TextAlign.right)),
+      ]),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          key: const ValueKey('soundTest'),
+          onPressed: s.soundOn
+              ? () async {
+                  for (final x in [Sfx.key, Sfx.add, Sfx.done]) {
+                    Sound.play(x);
+                    await Future<void>.delayed(const Duration(milliseconds: 450));
+                  }
+                }
+              : null,
+          icon: const Icon(Icons.play_arrow),
+          label: const Text('試しに鳴らす'),
+        ),
+      ),
+      const SizedBox(height: 4),
+      const Text('音が小さい・聞こえないときは、端末の横のボタンなどで「メディアの音量」を上げてください（着信音の音量とは別です）。', style: TextStyle(color: muted, fontSize: 12)),
+      if (!Sound.ready && Sound.problem.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(children: [
+            Expanded(child: Text('この端末で操作音の準備ができませんでした（${Sound.problem}）', style: const TextStyle(color: danger, fontSize: 12))),
+            TextButton(
+              onPressed: () async {
+                await Sound.init();
+                s.remoteChanged();
+                Sound.play(Sfx.done);
+              },
+              child: const Text('もう一度準備する'),
+            ),
+          ]),
+        ),
+    ]);
+  }
 }

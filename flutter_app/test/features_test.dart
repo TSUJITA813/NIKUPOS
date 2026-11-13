@@ -195,4 +195,77 @@ void main() {
     expect(s.lines.single['qty'], 2);
     await t.pump(const Duration(seconds: 3));
   });
+
+  testWidgets('次のお客様：新しい取引の画面に切り替わり、取引番号が進む', (t) async {
+    final s = await boot(t, const Size(390, 844));
+    expect(find.byKey(const ValueKey('newTxn')), findsNothing); // カートは閉じている（スマホ）
+    expect(find.textContaining('No.1　0点'), findsOneWidget);
+    await tapKey(t, 'product-p11');
+    await tapKey(t, 'payMini');
+    await tapKey(t, 'quick-exact');
+    await confirmPay(t);
+    final before = s.txnSerial;
+    await t.tap(find.byKey(const ValueKey('nextCustomer')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 150)); // 切り替えの途中：前の取引と新しい取引の画面が両方ある
+    expect(find.byKey(ValueKey('txn-${s.txnSerial}')), findsOneWidget);
+    expect(find.byKey(ValueKey('txn-$before')), findsOneWidget);
+    await t.pumpAndSettle();
+    expect(s.txnSerial, before + 1);
+    expect(find.byKey(ValueKey('txn-$before')), findsNothing);
+    expect(find.textContaining('No.2　0点'), findsOneWidget);
+    expect(find.textContaining('次のお客様の会計です（取引No.2）'), findsOneWidget);
+    await tapKey(t, 'openCart');
+    expect(find.text('新しいお会計　取引No.2'), findsOneWidget);
+    await t.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('操作音の設定：オン・オフ、音量（つまみ・ボタン）が動く', (t) async {
+    final s = await boot(t, const Size(390, 844));
+    await t.tap(find.byKey(const ValueKey('nav-管理')));
+    await t.pumpAndSettle();
+    await t.enterText(find.byKey(const ValueKey('authId')), 'tenshu');
+    await t.enterText(find.byKey(const ValueKey('authPw')), 'toriniku2026');
+    await t.enterText(find.byKey(const ValueKey('authPw2')), 'toriniku2026');
+    await t.tap(find.byKey(const ValueKey('authSubmit')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('recoveryOk')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('設定'));
+    await t.pumpAndSettle();
+    expect(s.soundVolume, 0.7);
+    await tapKey(t, 'soundUp');
+    expect(s.soundVolume, closeTo(0.8, 0.001));
+    await tapKey(t, 'soundDown');
+    await tapKey(t, 'soundDown');
+    expect(s.soundVolume, closeTo(0.6, 0.001));
+    // つまみを横に動かす（画面が横に切り替わらず、音量が変わる）
+    await reveal(t, find.byKey(const ValueKey('soundVol')));
+    await t.drag(find.byKey(const ValueKey('soundVol')), const Offset(300, 0));
+    await t.pumpAndSettle();
+    expect(s.soundVolume, closeTo(1.0, 0.001));
+    expect(find.text('設定'), findsWidgets);
+    expect(find.byKey(const ValueKey('soundPct')), findsOneWidget);
+    await tapKey(t, 'soundOn');
+    expect(s.soundOn, false);
+    await tapKey(t, 'soundOn');
+    expect(s.soundOn, true);
+    await t.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('会計中に画面が描き直されても、選んだキャッシュレスの種類は戻らない', (t) async {
+    final s = await boot(t, const Size(1280, 800));
+    await tapKey(t, 'product-p11');
+    await tapKey(t, 'payBtn');
+    await t.tap(find.byKey(const ValueKey('choice-cashless')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('choice-QR決済')));
+    await t.pumpAndSettle();
+    s.remoteChanged(); // クラウド同期で別の端末の変更が届いたとき
+    await t.pumpAndSettle();
+    await confirmPay(t);
+    expect(s.store.sales.single['cashlessType'], 'QR決済');
+    await tapKey(t, 'nextCustomer');
+    await t.pump(const Duration(seconds: 3));
+  });
 }

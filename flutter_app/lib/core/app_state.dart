@@ -213,6 +213,22 @@ class AppState extends ChangeNotifier {
     return c == null || c == 0 ? null : c.toInt();
   }
 
+  /// 何件目の取引の画面か（「次のお客様」で増え、画面がめくれるように切り替わる）
+  int txnSerial = 0;
+
+  /// 次に付く取引番号（例：A-13）
+  String get nextNoLabel {
+    final n = ((store.counters['seq'] ?? 0) as num).toInt() + 1;
+    final dev = (settings['deviceCode'] ?? '') as String;
+    return dev.isEmpty ? '$n' : '$dev-$n';
+  }
+
+  /// 次のお客様の会計にする
+  void startNewTransaction() {
+    txnSerial++;
+    notifyListeners();
+  }
+
   /// カートの前受金（予約から読み込んだとき）
   int get cartDeposit => ((cart['deposit'] ?? 0) as num).toInt();
 

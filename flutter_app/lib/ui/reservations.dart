@@ -405,10 +405,11 @@ class _ReservationFormState extends State<ReservationForm> {
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('キャンセル'))],
       ),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        SegmentedButton<String>(
-          segments: [for (final e in channelLabels.entries) ButtonSegment(value: e.key, label: Text(e.value), icon: Icon(channelIcon(e.key), size: 18))],
-          selected: {ch},
-          onSelectionChanged: (v) => setState(() => d['channel'] = v.first),
+        ChoiceBar<String>(
+          options: [for (final e in channelLabels.entries) (e.key, e.value)],
+          icons: {for (final k in channelLabels.keys) k: channelIcon(k)},
+          value: ch,
+          onChanged: (v) => setState(() => d['channel'] = v),
         ),
         const SizedBox(height: 8),
         TextField(
@@ -530,15 +531,19 @@ class _ReservationFormState extends State<ReservationForm> {
               },
               child: Text(dep > 0 ? yen(dep) : 'なし'),
             ),
-            const SizedBox(width: 8),
-            if (dep > 0)
-              SegmentedButton<String>(
-                segments: const [ButtonSegment(value: 'cash', label: Text('現金')), ButtonSegment(value: 'cashless', label: Text('キャッシュレス'))],
-                selected: {d['depositMethod'] as String},
-                onSelectionChanged: (v) => setState(() => d['depositMethod'] = v.first),
-              ),
           ],
         ]),
+        if (!depositLocked && dep > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: ChoiceBar<String>(
+              options: const [('cash', '現金'), ('cashless', 'キャッシュレス')],
+              icons: const {'cash': Icons.payments_outlined, 'cashless': Icons.credit_card},
+              value: d['depositMethod'] as String,
+              height: 40,
+              onChanged: (v) => setState(() => d['depositMethod'] = v),
+            ),
+          ),
         TextField(controller: note, maxLines: 2, decoration: const InputDecoration(labelText: 'メモ（ご要望・切り方など）')),
         if (msg.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(msg, key: const ValueKey('rMsg'), style: const TextStyle(color: danger))),
       ]),

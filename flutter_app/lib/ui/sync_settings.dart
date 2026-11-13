@@ -68,9 +68,13 @@ class _SyncSettingsState extends State<SyncSettings> {
   String msg = '';
   bool busy = false;
 
+  bool _inited = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_inited) return; // 入力欄の準備は最初の1回だけ
+    _inited = true;
     final s = AppScope.read(context);
     dev = TextEditingController(text: (s.settings['deviceCode'] ?? '') as String);
     final c = s.sync?.cfg ?? const {};

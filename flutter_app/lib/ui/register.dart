@@ -46,9 +46,33 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
+  int _serial = 0;
+
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
+    // 新しい取引になったら、検索とカテゴリを最初に戻す
+    if (_serial != s.txnSerial) {
+      _serial = s.txnSerial;
+      search.clear();
+      q = '';
+      cat = '__all';
+    }
+    // 「次のお客様」を押すと、新しい取引の画面が右から入ってくる（前の取引は左へ出ていく）
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 380),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, anim) {
+        final incoming = child.key == ValueKey('txn-${s.txnSerial}');
+        final slide = Tween<Offset>(begin: incoming ? const Offset(1, 0) : const Offset(-1, 0), end: Offset.zero).animate(anim);
+        return ClipRect(child: SlideTransition(position: slide, child: FadeTransition(opacity: anim, child: child)));
+      },
+      child: KeyedSubtree(key: ValueKey('txn-${s.txnSerial}'), child: _NewTxnScope(onBuild: () => _body(context, s))),
+    );
+  }
+
+  Widget _body(BuildContext context, AppState s) {
     final tablet = useTabletLayout(context, s);
     final catalog = _catalog(s, tablet);
     if (tablet) {
@@ -140,6 +164,14 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 }
 
+/// 取引ごとに作り直す部分（検索の文字やスクロールの位置も新しい取引で最初に戻る）
+class _NewTxnScope extends StatelessWidget {
+  final Widget Function() onBuild;
+  const _NewTxnScope({required this.onBuild});
+  @override
+  Widget build(BuildContext context) => onBuild();
+}
+
 class ProductTile extends StatelessWidget {
   final Json p;
   final num count;
@@ -199,7 +231,7 @@ class MiniCartBar extends StatelessWidget {
                 onTap: () => openCartSheet(context),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                   Row(children: [
-                    Text('${t.count}点', style: const TextStyle(color: muted)),
+                    Text('No.${s.nextNoLabel}　${t.count}点', style: const TextStyle(color: muted)),
                     if (n > 0) Text('　保留$n件', style: const TextStyle(color: accent, fontWeight: FontWeight.w700)),
                     const Spacer(),
                     Text(yen(s.cartDeposit > 0 ? (t.total - s.cartDeposit).clamp(0, 1 << 31) : t.total), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
@@ -249,6 +281,7 @@ class CartPanel extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Text('お会計', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              Text('　No.${s.nextNoLabel}', key: const ValueKey('cartNo'), style: const TextStyle(color: muted, fontSize: 13)),
               if (!s.cartEmpty) const Flexible(child: Text('　横にスライドで取消', style: TextStyle(color: muted, fontSize: 12), overflow: TextOverflow.ellipsis)),
               const Spacer(),
               if (inSheet) TextButton(onPressed: () => Navigator.pop(context), child: const Text('閉じる ▼')),
@@ -264,7 +297,15 @@ class CartPanel extends StatelessWidget {
         ),
         Expanded(
           child: s.cartEmpty
-              ? const Center(child: Text('商品ボタンをタップして追加', style: TextStyle(color: muted)))
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.receipt_long, size: 40, color: Color(0xFFCBBFB8)),
+                    const SizedBox(height: 6),
+                    Text('新しいお会計　取引No.${s.nextNoLabel}', key: const ValueKey('newTxn'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ink)),
+                    const SizedBox(height: 4),
+                    const Text('商品ボタンをタップして追加', style: TextStyle(color: muted)),
+                  ]),
+                )
               : ListView.separated(
                   itemCount: s.lines.length,
                   separatorBuilder: (_, _) => const Divider(height: 1, color: line),
@@ -631,7 +672,12 @@ Future<void> openPayDialog(BuildContext context) async {
         ? Dialog(child: SizedBox(width: 520, child: PayPanel(total: total)))
         : Dialog.fullscreen(child: PayPanel(total: total)),
   );
-  if (sale != null && context.mounted) await doneDialog(context, sale);
+  if (sale != null && context.mounted) {
+    await doneDialog(context, sale);
+    // 次のお客様：画面をめくるように新しい取引に切り替える
+    s.startNewTransaction();
+    if (context.mounted) toast(context, '次のお客様の会計です（取引No.${s.nextNoLabel}）');
+  }
 }
 
 class PayPanel extends StatefulWidget {
@@ -649,9 +695,14 @@ class _PayPanelState extends State<PayPanel> {
   bool saving = false;
   int deposit = 0; // 予約の前受金
 
+  bool _inited = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // 会計中に同期などで画面が描き直されても、選んだキャッシュレスの種類を戻さない
+    if (_inited) return;
+    _inited = true;
     final s = AppScope.read(context);
     ctype = s.cashlessTypes.first;
     deposit = s.cartDeposit;
@@ -710,23 +761,19 @@ class _PayPanelState extends State<PayPanel> {
                   AmountDisplay('ご返金（現金）', yen(p.refund), valueColor: const Color(0xFFFFD27A)),
                 ])
               : ListView(padding: const EdgeInsets.all(16), children: [
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'cash', label: Text('現金')),
-                ButtonSegment(value: 'cashless', label: Text('キャッシュレス')),
-                ButtonSegment(value: 'split', label: Text('併用')),
-              ],
-              selected: {method},
-              onSelectionChanged: (v) => setState(() {
-                method = v.first;
+            ChoiceBar<String>(
+              options: const [('cash', '現金'), ('cashless', 'キャッシュレス'), ('split', '併用')],
+              icons: const {'cash': Icons.payments_outlined, 'cashless': Icons.credit_card, 'split': Icons.call_split},
+              value: method,
+              onChanged: (v) => setState(() {
+                method = v;
                 if (method == 'split') { target = 'cl'; val = ''; }
               }),
             ),
+            if (method == 'split') const Padding(padding: EdgeInsets.only(top: 4), child: Text('併用：キャッシュレスと現金を組み合わせて支払う', style: TextStyle(color: muted, fontSize: 12))),
             if (method != 'cash') ...[
               const SizedBox(height: 8),
-              Wrap(spacing: 6, children: [
-                for (final t in s.cashlessTypes) ChoiceChip(label: Text(t), selected: ctype == t, onSelected: (_) => setState(() => ctype = t)),
-              ]),
+              ChoiceBar<String>(options: [for (final t in s.cashlessTypes) (t, t)], value: ctype, height: 40, onChanged: (v) => setState(() => ctype = v)),
             ],
             const SizedBox(height: 8),
             if (deposit > 0) ...[
@@ -785,7 +832,7 @@ class _PayPanelState extends State<PayPanel> {
 Future<void> doneDialog(BuildContext context, Json sale) async {
   final pm = salePayments(sale);
   final change = (sale['change'] ?? 0) as num;
-  final big = pm.cashless > 0 && pm.cash <= 0 ? ('キャッシュレス決済', yen(pm.cashless)) : ('おつり', yen(change));
+  final big = pm.cashless > 0 && pm.cash <= 0 ? ('キャッシュレス', yen(pm.cashless)) : ('おつり', yen(change));
   final t = (sale['totals'] as Map)['total'] as num;
   await showDialog<void>(
     context: context,

@@ -290,3 +290,58 @@ class CardGrid extends StatelessWidget {
         return Wrap(spacing: 8, runSpacing: 8, children: [for (final ch in children) SizedBox(width: w, child: ch)]);
       });
 }
+
+/// 選択ボタン（現金／キャッシュレス／併用 など）。
+/// どの画面でも同じ見た目で、文字は必ず1行（入らないときは文字を少し小さくする）。
+class ChoiceBar<T> extends StatelessWidget {
+  final List<(T, String)> options;
+  final T value;
+  final ValueChanged<T> onChanged;
+  final Map<T, IconData>? icons;
+  final double height;
+  const ChoiceBar({super.key, required this.options, required this.value, required this.onChanged, this.icons, this.height = 46});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (c, box) {
+      // ボタンの幅が狭いときは絵（アイコン）を省き、文字を大きく見せる
+      final w = (box.maxWidth - 6 * (options.length - 1)) / options.length;
+      final showIcons = w >= 140;
+      return Row(children: [
+        for (var i = 0; i < options.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(child: _option(options[i], showIcons)),
+        ],
+      ]);
+    });
+  }
+
+  Widget _option((T, String) o, bool showIcons) {
+    final on = o.$1 == value;
+    final IconData? icon = showIcons ? (icons == null ? null : icons![o.$1]) : null;
+    return Material(
+      color: on ? const Color(0xFFF7E3DC) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: on ? accent : line, width: on ? 2 : 1)),
+      child: InkWell(
+        key: ValueKey('choice-${o.$1}'),
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => onChanged(o.$1),
+        child: SizedBox(
+          height: height,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (icon != null) ...[Icon(icon, size: 18, color: on ? accent : ink), const SizedBox(width: 4)],
+                  Text(o.$2, maxLines: 1, softWrap: false, style: TextStyle(fontSize: 15, fontWeight: on ? FontWeight.w800 : FontWeight.w500, color: on ? accent : ink)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

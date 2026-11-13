@@ -84,6 +84,7 @@ void main() {
     expect(sale['noLabel'], '1');
     await tapKey(t, 'nextCustomer');
     expect(s.cartEmpty, true);
+    await t.pump(const Duration(seconds: 3)); // 知らせが消えるまで
   });
 
   testWidgets('保留と呼び出し・入れ替え', (t) async {
