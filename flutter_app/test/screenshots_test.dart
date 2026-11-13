@@ -189,4 +189,31 @@ void main() {
     await t.tap(find.byKey(const ValueKey('deviceSettings')));
     await shot(t, 'phone_device_settings');
   }, skip: !on);
+
+  testWidgets('並べ替え中・外税', (t) async {
+    final s = await start(t, const Size(390, 844));
+    s.products.firstWhere((p) => p['id'] == 'p2')['priceMode'] = 'excl';
+    s.remoteChanged();
+    await t.pumpAndSettle();
+    final from = t.getCenter(find.byKey(const ValueKey('product-p1')));
+    final to = t.getCenter(find.byKey(const ValueKey('product-p5')));
+    final g = await t.startGesture(from);
+    await t.pump(const Duration(milliseconds: 700));
+    for (var i = 1; i <= 8; i++) {
+      await g.moveTo(Offset.lerp(from, to, i / 8)!);
+      await t.pump(const Duration(milliseconds: 30));
+    }
+    await t.pump(const Duration(milliseconds: 120));
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('shots/phone_reorder.png'));
+    await g.up();
+    await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await t.pump(const Duration(milliseconds: 300));
+    await t.tap(find.byKey(const ValueKey('reorderDone')));
+    await t.pumpAndSettle();
+    await tapKey(t, 'product-p2');
+    await typeNumber(t, '200');
+    await tapKey(t, 'numOk');
+    await tapKey(t, 'openCart');
+    await shot(t, 'phone_excl_cart');
+  }, skip: !on);
 }

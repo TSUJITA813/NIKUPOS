@@ -336,13 +336,13 @@ class _ReservationFormState extends State<ReservationForm> {
     if (p == null || !mounted) return;
     if (p['unit'] == 'g') {
       final g = await numberDialog(context, title: p['name'] as String, label: '予定の重さ', unit: 'g', note: priceLabel(p), price: (p['price'] as num).toInt());
-      if (g != null && g > 0) setState(() => items.add({'productId': p['id'], 'name': p['name'], 'unit': 'g', 'price': p['price'], 'qty': g, 'taxRate': p['taxRate']}));
+      if (g != null && g > 0) setState(() => items.add({'productId': p['id'], 'name': p['name'], 'unit': 'g', 'price': p['price'], 'qty': g, 'taxRate': p['taxRate'], if (p['priceMode'] == 'excl') 'priceMode': 'excl'}));
     } else if (p['unit'] == 'pc') {
       final n = await numberDialog(context, title: p['name'] as String, label: '個数', unit: '個');
-      if (n != null && n > 0) setState(() => items.add({'productId': p['id'], 'name': p['name'], 'unit': 'pc', 'price': p['price'], 'qty': n, 'taxRate': p['taxRate']}));
+      if (n != null && n > 0) setState(() => items.add({'productId': p['id'], 'name': p['name'], 'unit': 'pc', 'price': p['price'], 'qty': n, 'taxRate': p['taxRate'], if (p['priceMode'] == 'excl') 'priceMode': 'excl'}));
     } else {
       final y = await numberDialog(context, title: p['name'] as String, label: '金額', unit: '円');
-      if (y != null && y > 0) setState(() => items.add({'productId': p['id'], 'name': p['name'], 'unit': 'open', 'price': y, 'qty': 1, 'taxRate': p['taxRate']}));
+      if (y != null && y > 0) setState(() => items.add({'productId': p['id'], 'name': p['name'], 'unit': 'open', 'price': y, 'qty': 1, 'taxRate': p['taxRate'], if (p['priceMode'] == 'excl') 'priceMode': 'excl'}));
     }
   }
 
@@ -505,7 +505,7 @@ class _ReservationFormState extends State<ReservationForm> {
             key: ValueKey('rItem-$i'),
             contentPadding: EdgeInsets.zero,
             title: Text(items[i]['name'] as String),
-            subtitle: Text('${itemQtyLabel(items[i])}${items[i]['unit'] == 'g' ? '（予定）' : ''}　概算 ${yen(lineAmount(items[i], s.rounding))}'),
+            subtitle: Text('${itemQtyLabel(items[i])}${items[i]['unit'] == 'g' ? '（予定）' : ''}　概算 ${yen(lineAmount(items[i], s.rounding))}${items[i]['priceMode'] == 'excl' ? '（税抜）' : ''}'),
             onTap: () => editItem(i),
             trailing: IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => items.removeAt(i))),
           ),

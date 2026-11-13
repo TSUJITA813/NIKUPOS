@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nikupos/core/calc.dart';
 
-/// Web版（js/calc.js）と同じ結果になることを、500通りの会計で確かめる
+/// Web版（js/calc.js）と同じ結果になることを、800通りの会計（外税を含む）で確かめる
 void main() {
   final data = jsonDecode(File('test/fixtures/calc_cases.json').readAsStringSync()) as Map<String, dynamic>;
   final cases = (data['cases'] as List).cast<Map<String, dynamic>>();

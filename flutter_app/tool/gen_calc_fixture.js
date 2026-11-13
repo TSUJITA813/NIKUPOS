@@ -4,13 +4,15 @@ const Calc = require('../../js/calc.js');
 let seed = 12345;
 const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
 const cases = [];
-for (let i = 0; i < 500; i++) {
+for (let i = 0; i < 800; i++) {
+  const exclRate = i < 300 ? 0 : i < 550 ? 3 : 1; // 外税なし・一部外税・全部外税
   const lines = [];
   const nl = 1 + rnd(5);
   for (let j = 0; j < nl; j++) {
     const unit = ['g', 'pc', 'open'][rnd(3)];
     const l = { unit, taxRate: rnd(5) === 0 ? 10 : 8, price: unit === 'g' ? 58 + rnd(300) : 5 + rnd(900), qty: unit === 'g' ? 1 + rnd(3000) : unit === 'pc' ? 1 + rnd(12) : 1 };
     if (unit === 'pc' && rnd(9) === 0) l.qty = -l.qty;
+    if (exclRate && rnd(exclRate) === 0) l.priceMode = 'excl';
     const dk = rnd(6);
     if (dk === 1) l.discount = { type: 'pct', value: [10, 20, 30, 50][rnd(4)] };
     if (dk === 2) l.discount = { type: 'yen', value: 10 + rnd(200) };

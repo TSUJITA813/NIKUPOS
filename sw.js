@@ -1,5 +1,5 @@
 // オフライン用キャッシュ。ファイルを更新したら VERSION を上げる
-var VERSION = 'nikupos-v20';
+var VERSION = 'nikupos-v21';
 var FILES = [
   './',
   'index.html',

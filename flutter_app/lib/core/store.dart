@@ -100,7 +100,7 @@ String nowIso() {
 
 /// 全端末で共通にする設定（Web版の SHARED_SETTINGS と同じ＋FAX番号）。それ以外は端末ごと
 const sharedSettings = [
-  'storeName', 'zip', 'address', 'tel', 'fax', 'invoiceNo', 'logo', 'logoSize', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct',
+  'storeName', 'zip', 'address', 'tel', 'fax', 'invoiceNo', 'logo', 'logoSize', 'priceModeDefault', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct',
   'cashlessTypes', 'promos', 'staff', 'permissions', 'fixedCosts', 'admins', 'adminRecovery',
 ];
 

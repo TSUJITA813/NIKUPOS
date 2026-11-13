@@ -53,28 +53,38 @@ class RateTotal {
 
 class Totals {
   final int subtotal, lineDiscount, discount, total, count;
+
+  /// 外税の消費税（税抜の値段の商品に足した分）
+  final int taxExtra;
   final List<RateTotal> byRate;
-  const Totals(this.subtotal, this.lineDiscount, this.discount, this.total, this.byRate, this.count);
+  const Totals(this.subtotal, this.lineDiscount, this.discount, this.total, this.byRate, this.count, [this.taxExtra = 0]);
   Json toJson() => {
         'subtotal': subtotal,
         'lineDiscount': lineDiscount,
         'discount': discount,
+        'taxExtra': taxExtra,
         'total': total,
         'byRate': byRate.map((r) => r.toJson()).toList(),
         'count': count,
       };
 }
 
-/// 合計（小計値引きは税率ごとに按分し、最大のグループで端数を吸収）
+/// 税抜の値段（外税）の行か
+bool isExcl(Json line) => line['priceMode'] == 'excl';
+
+/// 合計（Web版 js/calc.js の totals と同じ）。
+/// 行の priceMode が 'excl' なら税抜の値段（外税）、それ以外は税込の値段（内税）。
+/// 外税の消費税は、レシートごと・税率ごとに1回だけ計算（切り捨て）して合計に足す。
+/// 小計値引きは税率（と内税・外税）ごとに按分し、最大のグループで端数を吸収。
 Totals totals(List<Json> lines, Json? discount, String mode) {
-  final groups = <int, int>{};
+  final groups = <int, int>{}; // キー：内税は税率、外税は 1000＋税率
   var subtotal = 0, lineDiscountTotal = 0;
   for (final l in lines) {
     final amt = lineAmount(l, mode);
     lineDiscountTotal += lineDiscount(l, mode);
     subtotal += amt;
-    final r = _i(l['taxRate']);
-    groups[r] = (groups[r] ?? 0) + amt;
+    final k = (isExcl(l) ? 1000 : 0) + _i(l['taxRate']);
+    groups[k] = (groups[k] ?? 0) + amt;
   }
   var disc = 0;
   if (discount != null && _n(discount['value']) != 0) {
@@ -82,22 +92,29 @@ Totals totals(List<Json> lines, Json? discount, String mode) {
     if (disc > subtotal) disc = subtotal;
     if (disc < 0) disc = 0;
   }
-  final rates = groups.keys.toList()
+  final keys = groups.keys.toList()
     ..sort((a, b) {
       final c = groups[a]!.compareTo(groups[b]!);
       return c != 0 ? c : a.compareTo(b);
     });
   var allocated = 0;
-  final byRate = <RateTotal>[];
-  for (var i = 0; i < rates.length; i++) {
-    final rate = rates[i];
-    final alloc = i == rates.length - 1 ? disc - allocated : (subtotal != 0 ? (disc * groups[rate]! / subtotal).floor() : 0);
+  final net = <int, int>{};
+  for (var i = 0; i < keys.length; i++) {
+    final k = keys[i];
+    final alloc = i == keys.length - 1 ? disc - allocated : (subtotal != 0 ? (disc * groups[k]! / subtotal).floor() : 0);
     allocated += alloc;
-    final amount = groups[rate]! - alloc;
-    byRate.add(RateTotal(rate, amount, includedTax(amount, rate)));
+    net[k] = groups[k]! - alloc;
   }
-  byRate.sort((a, b) => a.rate.compareTo(b.rate));
-  return Totals(subtotal, lineDiscountTotal, disc, subtotal - disc, byRate, lines.length);
+  final rates = keys.map((k) => k % 1000).toSet().toList()..sort();
+  var taxExtra = 0;
+  final byRate = <RateTotal>[];
+  for (final rate in rates) {
+    final incl = net[rate] ?? 0, excl = net[1000 + rate] ?? 0;
+    final extra = (excl * rate / 100).floor();
+    taxExtra += extra;
+    byRate.add(RateTotal(rate, incl + excl + extra, includedTax(incl, rate) + extra));
+  }
+  return Totals(subtotal, lineDiscountTotal, disc, subtotal - disc + taxExtra, byRate, lines.length, taxExtra);
 }
 
 class Payment {

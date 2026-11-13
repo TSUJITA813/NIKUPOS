@@ -9,12 +9,14 @@ import '../core/receipt.dart';
 import '../core/receipt_pdf.dart';
 import '../core/sound.dart';
 import 'common.dart';
+import 'product_grid.dart';
 import 'reservations.dart' show outputPdf, pdfFont;
 
 String priceLabel(Json p) {
-  if (p['unit'] == 'g') return '${yen(p['price'] as num)}/100g';
-  if (p['unit'] == 'open') return '金額入力';
-  return yen(p['price'] as num);
+  final ex = p['priceMode'] == 'excl' ? '＋税' : '';
+  if (p['unit'] == 'g') return '${yen(p['price'] as num)}/100g$ex';
+  if (p['unit'] == 'open') return '金額入力$ex';
+  return '${yen(p['price'] as num)}$ex';
 }
 
 class RegisterPage extends StatefulWidget {
@@ -43,7 +45,7 @@ class _RegisterPageState extends State<RegisterPage> {
       final g = await numberDialog(context, title: p['name'] as String, label: '重さ', unit: 'g', note: '${priceLabel(p)}・はかりの値を入力', price: (p['price'] as num).toInt());
       if (g != null && g > 0) s.addToCart(p, qty: g);
     } else {
-      final yenVal = await numberDialog(context, title: p['name'] as String, label: '金額（税込）', unit: '円');
+      final yenVal = await numberDialog(context, title: p['name'] as String, label: p['priceMode'] == 'excl' ? '金額（税抜）' : '金額（税込）', unit: '円');
       if (yenVal != null && yenVal > 0) s.addToCart(p, price: yenVal);
     }
   }
@@ -155,12 +157,7 @@ class _RegisterPageState extends State<RegisterPage> {
       Expanded(
         child: list.isEmpty
             ? Center(child: Text(q.isNotEmpty ? '「$q」に合う商品はありません。' : '商品がありません。「管理」→「商品」から登録してください。', style: const TextStyle(color: muted)))
-            : GridView.builder(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: tablet ? 180 : 150, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.25),
-                itemCount: list.length,
-                itemBuilder: (c, i) => ProductTile(p: list[i], count: counts[list[i]['id']] ?? 0, onTap: () => tapProduct(s, list[i])),
-              ),
+            : ProductGrid(products: list, counts: counts, tablet: tablet, canReorder: q.isEmpty, onTap: (p) => tapProduct(s, p)),
       ),
     ]);
   }
@@ -196,7 +193,11 @@ class ProductTile extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(p['name'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: ink)),
               const Spacer(),
-              Text(priceLabel(p) + (p['taxRate'] == 10 ? '（10%）' : ''), style: const TextStyle(color: muted, fontSize: 14)),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(priceLabel(p) + (p['taxRate'] == 10 ? '（10%）' : ''), maxLines: 1, softWrap: false, style: const TextStyle(color: muted, fontSize: 14)),
+              ),
             ]),
           ),
           if (count > 0)
@@ -320,7 +321,8 @@ class CartPanel extends StatelessWidget {
           child: Column(children: [
             _sumRow('小計（${t.count}点）', yen(t.subtotal)),
             if (t.discount != 0) _sumRow('小計値引 ${discLabel(s.cart['discount'] as Json?)}', '-${numStr(t.discount)}', color: danger),
-            for (final r in t.byRate) _sumRow('${r.rate}%対象 ${yen(r.amount)}', '内税 ${yen(r.tax)}', small: true),
+            if (t.taxExtra != 0) _sumRow('外税（消費税）', yen(t.taxExtra)),
+            for (final r in t.byRate) _sumRow('${r.rate}%対象 ${yen(r.amount)}', '消費税 ${yen(r.tax)}', small: true),
             Row(children: [
               const Text('合計', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
               const Spacer(),
@@ -395,6 +397,7 @@ class CartPanel extends StatelessWidget {
         : l['unit'] == 'g'
             ? '${yen(l['price'] as num)}/100g × ${numStr(l['qty'] as num)}g'
             : '${yen(l['price'] as num)} × ${l['qty']}';
+    final detailEx = isExcl(l) ? '$detail（税抜）' : detail;
     final disc = lineDiscount(l, s.rounding);
     Widget bgBox(Alignment a) => Container(
           color: danger,
@@ -419,7 +422,7 @@ class CartPanel extends StatelessWidget {
         dense: true,
         title: Text(l['name'] as String, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
         subtitle: Text.rich(TextSpan(children: [
-          TextSpan(text: detail + (disc != 0 ? '　${discLabel(l['discount'] as Json?)} -${numStr(disc)}' : '')),
+          TextSpan(text: detailEx + (disc != 0 ? '　${discLabel(l['discount'] as Json?)} -${numStr(disc)}' : '')),
           if (l['estimated'] == true) const TextSpan(text: '　予定重量・要計量', style: TextStyle(color: danger, fontWeight: FontWeight.w700)),
         ])),
         trailing: Text(yen(lineAmount(l, s.rounding)), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),

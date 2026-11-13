@@ -117,7 +117,7 @@ List<RLine> receiptLines(Json sale, Json settings, {bool reprint = false}) {
   for (final l in (sale['lines'] as List).cast<Json>()) {
     final mark = l['taxRate'] == 8 ? '※' : '';
     final da = ((l['discountAmount'] ?? 0) as num).toInt();
-    out.add(RLine('$mark${l['name']}', right: yen((l['amount'] as num) + da)));
+    out.add(RLine('$mark${l['name']}${l['priceMode'] == 'excl' ? '（税抜）' : ''}', right: yen((l['amount'] as num) + da)));
     final qty = (l['qty'] as num).abs();
     if (l['unit'] == 'g') {
       out.add(RLine('${yen(l['price'] as num)}/100g × ${numStr(qty)}g', indent: true));
@@ -130,6 +130,8 @@ List<RLine> receiptLines(Json sale, Json settings, {bool reprint = false}) {
   out.add(const RLine.hr());
   out.add(RLine('小計', right: yen(t['subtotal'] as num)));
   if (((t['discount'] ?? 0) as num) != 0) out.add(RLine('値引 ${discLabel(sale['discount'] as Json?)}', right: '-${numStr(t['discount'] as num)}'));
+  final extra = ((t['taxExtra'] ?? 0) as num).toInt();
+  if (extra != 0) out.add(RLine('外税（消費税）', right: yen(extra)));
   out.add(RLine('合計', right: yen(t['total'] as num), big: true, bold: true));
   for (final r in (t['byRate'] as List)) {
     out.add(RLine('(${r['rate']}%対象', right: '${yen(r['amount'] as num)})'));

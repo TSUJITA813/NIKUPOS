@@ -49,15 +49,21 @@
    * @param discount 小計値引き {type:'yen'|'pct', value} | null
    * @param mode 端数処理 'floor'|'round'|'ceil'
    */
+  /**
+   * 合計。行の priceMode が 'excl' なら税抜の値段（外税）、それ以外は税込の値段（内税）。
+   * 外税の消費税は、レシートごと・税率ごとに1回だけ計算（切り捨て）して合計に足す（taxExtra）。
+   * byRate の amount は税込の対象額、tax はその中の消費税。
+   */
   function totals(lines, discount, mode) {
-    var groups = {};
+    var groups = {}; // キー：内税は税率、外税は 1000＋税率
     var subtotal = 0;
     var lineDiscountTotal = 0;
     lines.forEach(function (l) {
       var amt = lineAmount(l, mode);
       lineDiscountTotal += lineDiscount(l, mode);
       subtotal += amt;
-      groups[l.taxRate] = (groups[l.taxRate] || 0) + amt;
+      var k = l.priceMode === 'excl' ? 1000 + l.taxRate : l.taxRate;
+      groups[k] = (groups[k] || 0) + amt;
     });
 
     var disc = 0;
@@ -67,25 +73,35 @@
     }
 
     // 小計値引きを税率ごとに按分（最大のグループで端数を吸収）
-    var rates = Object.keys(groups).map(Number).sort(function (a, b) {
-      return groups[a] - groups[b];
+    var keys = Object.keys(groups).map(Number).sort(function (a, b) {
+      return groups[a] - groups[b] || a - b;
     });
     var allocated = 0;
-    var byRate = rates.map(function (rate, i) {
+    var net = {};
+    keys.forEach(function (k, i) {
       var alloc;
-      if (i === rates.length - 1) alloc = disc - allocated;
-      else alloc = subtotal ? Math.floor((disc * groups[rate]) / subtotal) : 0;
+      if (i === keys.length - 1) alloc = disc - allocated;
+      else alloc = subtotal ? Math.floor((disc * groups[k]) / subtotal) : 0;
       allocated += alloc;
-      var amount = groups[rate] - alloc;
-      return { rate: rate, amount: amount, tax: includedTax(amount, rate) };
+      net[k] = groups[k] - alloc;
     });
-    byRate.sort(function (a, b) { return a.rate - b.rate; });
+    var rates = {};
+    keys.forEach(function (k) { rates[k % 1000] = true; });
+    var taxExtra = 0;
+    var byRate = Object.keys(rates).map(Number).sort(function (a, b) { return a - b; }).map(function (rate) {
+      var incl = net[rate] || 0;
+      var excl = net[1000 + rate] || 0;
+      var extra = Math.floor((excl * rate) / 100);
+      taxExtra += extra;
+      return { rate: rate, amount: incl + excl + extra, tax: includedTax(incl, rate) + extra };
+    });
 
     return {
       subtotal: subtotal,
       lineDiscount: lineDiscountTotal,
       discount: disc,
-      total: subtotal - disc,
+      taxExtra: taxExtra,
+      total: subtotal - disc + taxExtra,
       byRate: byRate,
       count: lines.length
     };
@@ -154,7 +170,7 @@
 
   /** 予約の概算金額（グラム売りは予定重量で計算） */
   function reservationEstimate(r, mode) {
-    return r.items.reduce(function (s, it) { return s + lineAmount(it, mode); }, 0);
+    return totals(r.items, null, mode).total; // 外税の商品は消費税を足す
   }
 
   /** 仕込み集計：指定日の受取予定（取消・受渡済を除く）を商品ごとに合計 */

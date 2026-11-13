@@ -76,7 +76,7 @@
     drawerAuto: true
   };
   // 全端末で共通にする設定（それ以外はこの端末だけの設定）
-  var SHARED_SETTINGS = ['storeName', 'zip', 'address', 'tel', 'fax', 'invoiceNo', 'logo', 'logoSize', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct', 'cashlessTypes', 'promos', 'staff', 'permissions', 'fixedCosts', 'admins', 'adminRecovery'];
+  var SHARED_SETTINGS = ['storeName', 'zip', 'address', 'tel', 'fax', 'invoiceNo', 'logo', 'logoSize', 'priceModeDefault', 'footer', 'categories', 'rounding', 'bankInfo', 'feeMax', 'acct', 'cashlessTypes', 'promos', 'staff', 'permissions', 'fixedCosts', 'admins', 'adminRecovery'];
 
   // ---------- localStorage ----------
   function read(key, fallback) {

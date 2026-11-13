@@ -9,8 +9,7 @@ const statusLabels = {'reserved': '予約中', 'ready': '準備済', 'done': '�
 bool isActiveReservation(Json r) => r['status'] == 'reserved' || r['status'] == 'ready';
 
 /// 予約の概算金額（グラム売りは予定重量で計算）
-int reservationEstimate(Json r, String mode) =>
-    ((r['items'] as List?) ?? const []).cast<Json>().fold(0, (s, it) => s + lineAmount(it, mode));
+int reservationEstimate(Json r, String mode) => totals(((r['items'] as List?) ?? const []).cast<Json>(), null, mode).total;
 
 class PrepItem {
   final String productId, name, unit;

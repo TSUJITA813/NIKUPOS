@@ -1,6 +1,7 @@
 // アプリ全体の状態（カート・保留・会計・商品・設定・管理者のログイン・画面レイアウト）
 
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -109,6 +110,7 @@ class AppState extends ChangeNotifier {
         'price': price ?? (p['price'] as num).toInt(),
         'qty': qty,
         'taxRate': p['taxRate'],
+        if (p['priceMode'] == 'excl') 'priceMode': 'excl',
         'discount': null,
       };
 
@@ -248,7 +250,7 @@ class AppState extends ChangeNotifier {
         for (final l in lines)
           {
             'productId': l['productId'], 'name': l['name'], 'unit': l['unit'], 'price': l['price'], 'qty': l['qty'],
-            'taxRate': l['taxRate'], 'discount': l['discount'], 'promoName': '', 'promoDiscount': 0,
+            'taxRate': l['taxRate'], if (isExcl(l)) 'priceMode': 'excl', 'discount': l['discount'], 'promoName': '', 'promoDiscount': 0,
             'discountAmount': lineDiscount(l, rounding), 'amount': lineAmount(l, rounding),
             'cost': _costNow(l['productId'], l['unit']),
           }
@@ -413,6 +415,7 @@ class AppState extends ChangeNotifier {
               'price': pr.isNotEmpty && it['unit'] != 'open' ? pr.first['price'] : it['price'],
               'qty': it['qty'],
               'taxRate': pr.isNotEmpty ? pr.first['taxRate'] : (it['taxRate'] ?? 8),
+              if ((pr.isNotEmpty ? pr.first['priceMode'] : it['priceMode']) == 'excl') 'priceMode': 'excl',
               'discount': null,
             };
             if (it['unit'] == 'g') l['estimated'] = true;
@@ -449,13 +452,60 @@ class AppState extends ChangeNotifier {
   }
 
   // ---------------- 商品・設定 ----------------
+  /// 全部の商品を内税（incl）・外税（excl）にする。新しく登録する商品もそれに合わせる
+  Future<void> setPriceModeAll(String mode) async {
+    final changed = <String>[];
+    for (final p in products) {
+      if ((p['priceMode'] == 'excl') != (mode == 'excl')) {
+        if (mode == 'excl') {
+          p['priceMode'] = 'excl';
+        } else {
+          p.remove('priceMode');
+        }
+        changed.add(p['id'] as String);
+      }
+    }
+    settings['priceModeDefault'] = mode;
+    await saveSettings();
+    await store.saveProducts(changed);
+    log('product', '全部の商品を${mode == 'excl' ? '外税' : '内税'}に変更');
+    notifyListeners();
+  }
+
+  /// 商品の並べ替え。subset：並べ替えた商品（画面に出ていた分）を新しい順で。
+  /// ほかの商品の位置は動かさず、subset が占めていた場所に新しい順で入れ直し、全体を 0,1,2… に振り直す
+  Future<void> reorderProducts(List<Json> subset) async {
+    final idx = {for (var i = 0; i < products.length; i++) products[i]['id']: i};
+    final full = products.toList()
+      ..sort((a, b) {
+        final c = ((a['order'] ?? 0) as num).compareTo((b['order'] ?? 0) as num);
+        return c != 0 ? c : idx[a['id']]!.compareTo(idx[b['id']]!);
+      });
+    final ids = subset.map((p) => p['id']).toSet();
+    var k = 0;
+    for (var i = 0; i < full.length; i++) {
+      if (ids.contains(full[i]['id'])) full[i] = subset[k++];
+    }
+    final changed = <String>[];
+    for (var i = 0; i < full.length; i++) {
+      if (full[i]['order'] != i) {
+        full[i]['order'] = i;
+        changed.add(full[i]['id'] as String);
+      }
+    }
+    if (changed.isEmpty) return;
+    await store.saveProducts(changed);
+    log('product', '商品の並び順を変更');
+    notifyListeners();
+  }
+
   Future<void> saveProduct(Json p) async {
     final i = products.indexWhere((x) => x['id'] == p['id']);
     if (i >= 0) {
       products[i] = p;
     } else {
       p['id'] = Store.newId('p');
-      p['order'] = products.length;
+      p['order'] = products.fold<num>(-1, (m, x) => math.max(m, ((x['order'] ?? 0) as num))) + 1;
       products.add(p);
     }
     await store.saveProducts([p['id'] as String]);

@@ -560,10 +560,11 @@ class ProductsAdmin extends StatelessWidget {
       ),
       body: ListView.separated(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-        itemCount: list.length,
+        itemCount: list.length + 1,
         separatorBuilder: (_, _) => const SizedBox(height: 6),
         itemBuilder: (c, i) {
-          final p = list[i];
+          if (i == 0) return const _PriceModeBar();
+          final p = list[i - 1];
           final unit = p['unit'] == 'g' ? '/100g' : '';
           final costUnit = p['unit'] == 'g' ? '/kg' : '/個';
           return Material(
@@ -573,7 +574,7 @@ class ProductsAdmin extends StatelessWidget {
               key: ValueKey('padmin-${p['id']}'),
               leading: CircleAvatar(backgroundColor: colorFrom(p['color'] as String?), radius: 10),
               title: Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text('${p['category']}・${p['unit'] == 'open' ? '金額入力' : '${yen(p['price'] as num)}$unit'}'
+              subtitle: Text('${p['category']}・${p['unit'] == 'open' ? '金額入力' : '${yen(p['price'] as num)}$unit'}${p['priceMode'] == 'excl' ? '（税抜き）' : ''}'
                   '${p['cost'] != null && p['cost'] != 0 ? '・原価 ${yen(p['cost'] as num)}$costUnit' : '・原価 未登録'}${p['taxRate'] == 10 ? '・10%' : ''}'),
               trailing: const Icon(Icons.edit),
               onTap: () => productDialog(context, p),
@@ -585,13 +586,55 @@ class ProductsAdmin extends StatelessWidget {
   }
 }
 
+/// 値段の消費税（内税・外税）の件数と、まとめて変えるボタン
+class _PriceModeBar extends StatelessWidget {
+  const _PriceModeBar();
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    final excl = s.products.where((p) => p['priceMode'] == 'excl').length;
+    final incl = s.products.length - excl;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      decoration: BoxDecoration(color: const Color(0xFFFFF8E6), borderRadius: BorderRadius.circular(10), border: Border.all(color: line)),
+      child: Row(children: [
+        Expanded(child: Text('値段の消費税：内税（税込み） $incl件・外税（税抜き） $excl件\n並べ替えは、レジの画面で商品を長押しして動かします。', style: const TextStyle(fontSize: 13))),
+        TextButton(key: const ValueKey('priceModeAll'), onPressed: () => priceModeAllDialog(context), child: const Text('まとめて変える')),
+      ]),
+    );
+  }
+}
+
+Future<void> priceModeAllDialog(BuildContext context) async {
+  final s = AppScope.read(context);
+  final v = await showDialog<String>(
+    context: context,
+    builder: (c) => SimpleDialog(title: const Text('全部の商品の値段を'), children: [
+      SimpleDialogOption(
+        key: const ValueKey('allIncl'),
+        onPressed: () => Navigator.pop(c, 'incl'),
+        child: const ListTile(title: Text('内税（税込みの値段）にする'), subtitle: Text('値段に消費税がふくまれている')),
+      ),
+      SimpleDialogOption(
+        key: const ValueKey('allExcl'),
+        onPressed: () => Navigator.pop(c, 'excl'),
+        child: const ListTile(title: Text('外税（税抜きの値段）にする'), subtitle: Text('会計のときに消費税を足す')),
+      ),
+    ]),
+  );
+  if (v == null || !context.mounted) return;
+  if (!await confirmDialog(context, '全部の商品を「${v == 'excl' ? '外税（税抜き）' : '内税（税込み）'}」にします。値段の数字はそのままです。よろしいですか？', ok: '変える')) return;
+  await s.setPriceModeAll(v);
+  if (context.mounted) toast(context, '全部の商品を${v == 'excl' ? '外税' : '内税'}にしました');
+}
+
 const productColors = ['#e8846b', '#f1a98f', '#f4c1ad', '#c96a5a', '#a8564a', '#d9a441', '#b8743a', '#e9d27a', '#7fb07a', '#6fa8c9', '#8fa3b8', '#9aa3ab', '#7f8c8d'];
 
 Future<void> productDialog(BuildContext context, Json? p) async {
   final s = AppScope.read(context);
   final isNew = p == null;
   final d = <String, dynamic>{
-    ...(p ?? {'name': '', 'category': s.categories.first, 'unit': 'g', 'price': 0, 'taxRate': 8, 'color': productColors.first}),
+    ...(p ?? {'name': '', 'category': s.categories.first, 'unit': 'g', 'price': 0, 'taxRate': 8, 'color': productColors.first, if (s.settings['priceModeDefault'] == 'excl') 'priceMode': 'excl'}),
   };
   final name = TextEditingController(text: d['name'] as String);
   final kana = TextEditingController(text: (d['kana'] ?? '') as String);
@@ -629,8 +672,24 @@ Future<void> productDialog(BuildContext context, Json? p) async {
                 value: d['unit'] as String,
                 onChanged: (v) => set(() => d['unit'] = v),
               ),
+              const SizedBox(height: 10),
+              const Text('値段の消費税', style: TextStyle(color: muted)),
+              ChoiceBar<String>(
+                options: const [('incl', '内税（税込みの値段）'), ('excl', '外税（税抜きの値段）')],
+                value: d['priceMode'] == 'excl' ? 'excl' : 'incl',
+                onChanged: (v) => set(() => v == 'excl' ? d['priceMode'] = 'excl' : d.remove('priceMode')),
+              ),
+              Text(
+                d['priceMode'] == 'excl' ? '会計のときに、税抜きの値段に消費税（${d['taxRate']}%）を足します。' : '値段に消費税がふくまれています（今までどおり）。',
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
               if (!open) ...[
-                TextField(key: const ValueKey('pPrice'), controller: price, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: g ? '単価（100gあたり・税込・円）' : '単価（1個あたり・税込・円）')),
+                TextField(
+                  key: const ValueKey('pPrice'),
+                  controller: price,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(labelText: '単価（${g ? '100g' : '1個'}あたり・${d['priceMode'] == 'excl' ? '税抜き' : '税込み'}・円）'),
+                ),
                 TextField(key: const ValueKey('pCost'), controller: cost, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: '原価（${g ? '1kg' : '1個'}あたり・税抜・円）', hintText: '空欄なら粗利を計算しません')),
               ],
               const SizedBox(height: 10),

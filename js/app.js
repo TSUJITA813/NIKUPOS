@@ -46,9 +46,10 @@ Store.init().then(function () {
     return '×' + l.qty;
   }
   function priceLabel(p) {
-    if (p.unit === 'g') return yen(p.price) + '/100g';
-    if (p.unit === 'open') return '金額入力';
-    return yen(p.price);
+    var ex = p.priceMode === 'excl' ? '（税抜）' : '';
+    if (p.unit === 'g') return yen(p.price) + '/100g' + ex;
+    if (p.unit === 'open') return '金額入力' + ex;
+    return yen(p.price) + ex;
   }
   function discLabel(d) {
     if (!d || !d.value) return '';
@@ -256,6 +257,7 @@ Store.init().then(function () {
       price: price != null ? price : p.price,
       qty: qty,
       taxRate: p.taxRate,
+      priceMode: p.priceMode === 'excl' ? 'excl' : undefined,
       discount: null
     };
   }
@@ -311,8 +313,9 @@ Store.init().then(function () {
     var html = '';
     html += '<div class="sum-row"><span>小計（' + t.count + '点）</span><span class="num">' + yen(t.subtotal) + '</span></div>';
     if (t.discount) html += '<div class="sum-row" style="color:var(--danger)"><span>小計値引 ' + discLabel(cart.discount) + '</span><span class="num">-' + num(t.discount) + '</span></div>';
+    if (t.taxExtra) html += '<div class="sum-row"><span>外税（消費税）</span><span class="num">' + yen(t.taxExtra) + '</span></div>';
     t.byRate.forEach(function (r) {
-      html += '<div class="sum-row"><span>' + r.rate + '%対象 ' + yen(r.amount) + '</span><span class="num">内税 ' + yen(r.tax) + '</span></div>';
+      html += '<div class="sum-row"><span>' + r.rate + '%対象 ' + yen(r.amount) + '</span><span class="num">消費税 ' + yen(r.tax) + '</span></div>';
     });
     html += '<div class="sum-row total"><span>合計</span><span class="num">' + yen(t.total) + '</span></div>';
     var dep = cart.deposit || 0;
@@ -581,7 +584,7 @@ Store.init().then(function () {
       $('mOk').disabled = !Number(val);
     }
     openModal(
-      '<h3>' + esc(p.name) + '</h3><div class="sub">金額を入力（税込・' + p.taxRate + '%）</div>' +
+      '<h3>' + esc(p.name) + '</h3><div class="sub">金額を入力（' + (p.priceMode === 'excl' ? '税抜' : '税込') + '・' + p.taxRate + '%）</div>' +
       '<div class="display"><span class="label">金額</span><span class="value" id="mP"></span></div>' +
       keypadHtml() +
       '<div class="modal-foot"><button class="btn" data-act="cancel">キャンセル</button>' +
@@ -901,7 +904,8 @@ Store.init().then(function () {
       lines: cart.lines.map(function (l) {
         return {
           productId: l.productId, name: l.name, unit: l.unit, price: l.price, qty: l.qty,
-          taxRate: l.taxRate, discount: l.discount, promoName: l.promoName || '', promoDiscount: l.promoDiscount || 0,
+          taxRate: l.taxRate, priceMode: l.priceMode === 'excl' ? 'excl' : undefined,
+          discount: l.discount, promoName: l.promoName || '', promoDiscount: l.promoDiscount || 0,
           cost: costNow(l.productId, l.unit), // 会計時の原価（税抜・1kg／1個あたり）。あとで原価を変えても過去の粗利は変わらない
           discountAmount: Calc.lineDiscount(l, round()),
           amount: Calc.lineAmount(l, round())
@@ -1054,7 +1058,7 @@ Store.init().then(function () {
     h += '<hr>';
     sale.lines.forEach(function (l) {
       var mark = l.taxRate === 8 ? '※' : '';
-      h += '<div class="row"><span>' + mark + esc(l.name) + '</span><span>' + yen(l.amount + (l.discountAmount || 0)) + '</span></div>';
+      h += '<div class="row"><span>' + mark + esc(l.name) + (l.priceMode === 'excl' ? '（税抜）' : '') + '</span><span>' + yen(l.amount + (l.discountAmount || 0)) + '</span></div>';
       if (l.unit === 'g') h += '<div class="ind">' + yen(l.price) + '/100g × ' + num(Math.abs(l.qty)) + 'g</div>';
       else if (l.unit === 'pc' && Math.abs(l.qty) > 1) h += '<div class="ind">' + yen(l.price) + ' × ' + Math.abs(l.qty) + '</div>';
       if (l.discountAmount) h += '<div class="row ind"><span>' + (l.promoName && !(l.discount && l.discount.value) ? esc(l.promoName) : '値引 ' + discLabel(l.discount)) + '</span><span>-' + num(l.discountAmount) + '</span></div>';
@@ -1062,6 +1066,7 @@ Store.init().then(function () {
     var t = sale.totals;
     h += '<hr><div class="row"><span>小計</span><span>' + yen(t.subtotal) + '</span></div>';
     if (t.discount) h += '<div class="row"><span>値引 ' + discLabel(sale.discount) + '</span><span>-' + num(t.discount) + '</span></div>';
+    if (t.taxExtra) h += '<div class="row"><span>外税（消費税）</span><span>' + yen(t.taxExtra) + '</span></div>';
     h += '<div class="row big"><span>合計</span><span>' + yen(t.total) + '</span></div>';
     t.byRate.forEach(function (r) {
       h += '<div class="row"><span>(' + r.rate + '%対象</span><span>' + yen(r.amount) + ')</span></div>';
@@ -1575,7 +1580,7 @@ Store.init().then(function () {
 
   function openProductModal(p) {
     var isNew = !p;
-    var d = p ? JSON.parse(JSON.stringify(p)) : { name: '', category: categories()[0] || '生肉', unit: 'g', price: '', taxRate: 8, color: COLORS[0] };
+    var d = p ? JSON.parse(JSON.stringify(p)) : { name: '', category: categories()[0] || '生肉', unit: 'g', price: '', taxRate: 8, color: COLORS[0], priceMode: settings.priceModeDefault === 'excl' ? 'excl' : undefined };
     var cats = categories();
     openModal(
       '<h3>' + (isNew ? '商品を追加' : '商品を編集') + '</h3>' +
@@ -1600,6 +1605,9 @@ Store.init().then(function () {
       (d.parStock ? (d.unit === 'g' ? d.parStock / 1000 : d.parStock) : '') + '" placeholder="空欄なら発注点の2倍"></label>' +
       '<label id="pCostLabel"><span id="pCostText"></span><input name="cost" type="number" inputmode="numeric" min="0" step="1" value="' + esc(d.cost || '') + '" placeholder="空欄なら粗利を計算しません"></label>' +
       '<label id="pSupLabel">仕入先（発注書で使います）<input name="supplier" value="' + esc(d.supplier || '') + '" autocomplete="off"></label>' +
+      '<label>値段の消費税<div class="seg" id="pMode">' +
+      '<button type="button" class="btn small" data-mode="incl">内税（税込みの値段）</button>' +
+      '<button type="button" class="btn small" data-mode="excl">外税（税抜きの値段）</button></div></label>' +
       '<label>税率<div class="seg" id="pTax">' +
       '<button type="button" class="btn small" data-tax="8">8%（食品・持ち帰り）</button>' +
       '<button type="button" class="btn small" data-tax="10">10%（レジ袋など）</button></div></label>' +
@@ -1615,6 +1623,7 @@ Store.init().then(function () {
         if (!b) return;
         if (b.dataset.unit) { d.unit = b.dataset.unit; draw(); }
         else if (b.dataset.tax) { d.taxRate = Number(b.dataset.tax); draw(); }
+        else if (b.dataset.mode) { if (b.dataset.mode === 'excl') d.priceMode = 'excl'; else delete d.priceMode; draw(); }
         else if (b.dataset.color) { d.color = b.dataset.color; draw(); }
         else if (b.dataset.act === 'cancel') closeModal();
         else if (b.dataset.act === 'del') {
@@ -1662,7 +1671,9 @@ Store.init().then(function () {
       modalBody.querySelectorAll('[data-tax]').forEach(function (x) { x.classList.toggle('on', Number(x.dataset.tax) === d.taxRate); });
       modalBody.querySelectorAll('[data-color]').forEach(function (x) { x.classList.toggle('on', x.dataset.color === d.color); });
       $('pPriceLabel').style.display = d.unit === 'open' ? 'none' : '';
-      $('pPriceText').textContent = d.unit === 'g' ? '単価（100gあたり・税込・円）' : '単価（1個あたり・税込・円）';
+      var tx = d.priceMode === 'excl' ? '税抜' : '税込';
+      $('pPriceText').textContent = d.unit === 'g' ? '単価（100gあたり・' + tx + '・円）' : '単価（1個あたり・' + tx + '・円）';
+      modalBody.querySelectorAll('[data-mode]').forEach(function (x) { x.classList.toggle('on', x.dataset.mode === (d.priceMode === 'excl' ? 'excl' : 'incl')); });
       var open = d.unit === 'open';
       $('pWsLabel').style.display = open ? 'none' : '';
       $('pTrackLabel').style.display = open ? 'none' : '';
@@ -1830,6 +1841,7 @@ Store.init().then(function () {
           key: 'L' + (lineSeq++), productId: it.productId, name: it.name, unit: it.unit,
           price: pr && it.unit !== 'open' ? pr.price : it.price, qty: it.qty, taxRate: pr ? pr.taxRate : it.taxRate, discount: null
         };
+        if ((pr ? pr.priceMode : it.priceMode) === 'excl') l.priceMode = 'excl';
         if (it.unit === 'g') l.estimated = true; // 実際の重さで量り直す
         return l;
       }),
@@ -1897,6 +1909,7 @@ Store.init().then(function () {
             productId: p.id, name: p.name, unit: p.unit, price: p.price, taxRate: p.taxRate,
             qty: p.unit === 'g' ? 500 : 1
           });
+          if (p.priceMode === 'excl') r.items[r.items.length - 1].priceMode = 'excl';
           drawItems();
           var inputs = modalBody.querySelectorAll('#rItems input');
           if (inputs.length) { inputs[inputs.length - 1].focus(); inputs[inputs.length - 1].select(); }
