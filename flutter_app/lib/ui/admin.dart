@@ -10,6 +10,7 @@ import '../core/calc.dart';
 import '../core/profit.dart';
 import '../core/sound.dart';
 import 'common.dart';
+import 'sync_settings.dart';
 
 class AdminPage extends StatelessWidget {
   const AdminPage({super.key});
@@ -812,6 +813,8 @@ class _SettingsAdminState extends State<SettingsAdmin> {
             ),
             const SizedBox(height: 12),
             FilledButton(key: const ValueKey('settingsSave'), onPressed: save, child: const Text('保存')),
+            h2('クラウド同期（全端末・管理画面で共有）'),
+            const SyncSettings(),
             h2('管理者（ID・パスワード）'),
             Text('ログイン中：${s.adminId}　操作がないと ${s.adminTimeoutMin}分で自動ログアウトします。', style: const TextStyle(color: muted)),
             Wrap(spacing: 8, children: [

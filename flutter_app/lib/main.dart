@@ -1,21 +1,32 @@
 // NIKUPOS（Flutter版）：鶏肉店のPOSレジ
 //  開発中は Android 向けにビルド。将来は iPhone・iPad・Windows にも対応する。
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/app_state.dart';
 import 'core/sound.dart';
+import 'core/sync.dart';
+import 'core/backend.dart';
 import 'core/store.dart';
 import 'ui/common.dart';
 import 'ui/shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final backend = SqliteBackend();
-  await backend.open();
+  final backend = await openBackend();
   final state = AppState(Store(backend));
   await state.init();
+  state.attachSync((st) => CloudSync(st.store, onRemote: st.remoteChanged, onStatus: st.remoteChanged));
+  if (kIsWeb) {
+    state.tab.value = 3; // 管理画面は「管理」から
+    // 開発用：手元（localhost）で開いたときだけ、?testServer=… でテスト用サーバーにつなげる
+    final ts = Uri.base.queryParameters['testServer'];
+    if (ts != null && (Uri.base.host == 'localhost' || Uri.base.host == '127.0.0.1') && !(state.sync?.enabled ?? false)) {
+      state.sync!.useTestServer(ts);
+    }
+  }
   await Sound.init();
   runApp(NikuposApp(state: state));
 }
@@ -40,13 +51,13 @@ class NikuposApp extends StatelessWidget {
     return AppScope(
       state: state,
       child: MaterialApp(
-        title: 'NIKUPOS',
+        title: kIsWeb ? 'NIKUPOS 管理画面' : 'NIKUPOS',
         debugShowCheckedModeBanner: false,
         theme: nikuposTheme(),
         locale: const Locale('ja', 'JP'),
         supportedLocales: const [Locale('ja', 'JP')],
         localizationsDelegates: const [GlobalMaterialLocalizations.delegate, GlobalWidgetsLocalizations.delegate, GlobalCupertinoLocalizations.delegate],
-        home: const HomeShell(),
+        home: const RootPage(),
       ),
     );
   }

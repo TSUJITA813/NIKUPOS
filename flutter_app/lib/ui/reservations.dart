@@ -1,5 +1,6 @@
 // 予約・取り置き（電話・FAX・店頭）
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -189,7 +190,7 @@ class ReservationCard extends StatelessWidget {
             if (active) ...[
               const SizedBox(height: 8),
               Wrap(spacing: 6, runSpacing: 6, children: [
-                FilledButton.icon(
+                if (!kIsWeb) FilledButton.icon(
                   key: ValueKey('checkout-${r['id']}'),
                   onPressed: () async {
                     await s.loadReservation(r);

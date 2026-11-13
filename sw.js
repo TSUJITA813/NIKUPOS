@@ -1,5 +1,5 @@
 // オフライン用キャッシュ。ファイルを更新したら VERSION を上げる
-var VERSION = 'nikupos-v17';
+var VERSION = 'nikupos-v18';
 var FILES = [
   './',
   'index.html',
@@ -48,6 +48,9 @@ self.addEventListener('activate', function (e) {
 // ネットワーク優先・失敗時はキャッシュ（更新がすぐ反映され、圏外でも動く）
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
+  // 管理画面（kanri/：Flutter で作った別のアプリ）と、ほかのサイトのファイルはこのアプリの保存対象にしない
+  var url = new URL(e.request.url);
+  if (url.origin !== self.location.origin || url.pathname.indexOf('/kanri/') >= 0) return;
   e.respondWith(
     fetch(e.request).then(function (res) {
       var copy = res.clone();

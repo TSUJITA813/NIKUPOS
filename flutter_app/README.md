@@ -34,7 +34,18 @@ Web版（リポジトリ直下）の NIKUPOS を、Flutter で作り直してい
 - 売上・商品・設定のデータは Web版と同じ形（JSON）で保存しているので、Web版のバックアップの取り込みを今後追加できます。管理者のパスワードも同じ方式（PBKDF2-SHA256・21万回）です。
 
 ## まだ Web版にだけある機能（順に移していきます）
-卸・掛売り・請求書、在庫・発注、返品・宛名入り領収書、レジ締め・入出金、タイムセール・まとめ売り、担当者と権限、売上分析・期間の書き出し、価格改定（予約・Excel）、会計ソフト連携、クラウド同期、はかりの Bluetooth 接続、レシートプリンター（TM-m30）への印刷、バックアップと復元。
+卸・掛売り・請求書、在庫・発注、返品・宛名入り領収書、レジ締め・入出金、タイムセール・まとめ売り、担当者と権限、売上分析・期間の書き出し、価格改定（予約・Excel）、会計ソフト連携、はかりの Bluetooth 接続、レシートプリンター（TM-m30）への印刷、バックアップと復元。
+
+## クラウド同期と管理画面のURL
+- **クラウド同期**：「管理」→「設定」→「クラウド同期」で、Firebase のAPIキー・プロジェクトID・お店用のメールアドレス・パスワードを入れて「接続する」。Web版（リポジトリ直下）と**同じしくみ・同じ保存形式**なので、Web版・Androidアプリ・管理画面のどれで入れたデータも共有されます。Firebase の準備はリポジトリ直下の README「複数の端末で使う」を見てください。
+  - 売上・予約・操作ログ・入出金・商品・全端末で共通の設定（店名・カテゴリ・管理者など）を共有。端末の記号・画面のレイアウト・操作音・保留は端末ごと
+  - 30秒ごとと変更の直後に送受信。通信できない間もレジは使え、つながったら送る。同じデータを両方で変えたら後から変えた方を採用
+  - 上の帯の雲のマークで状態が分かります（タップで今すぐ同期）
+- **管理画面のURL**：**https://tsujita813.github.io/NIKUPOS/kanri/**（GitHub Pages を公開したあと）
+  - パソコン・スマホのブラウザで開き、最初に「お店のクラウドにつなぐ」（レジと同じアカウント）→ 管理者のID・パスワードでログイン
+  - ダッシュボード・売上・予約（電話・FAXの受付も）・商品と価格・設定。レジはありません
+  - ログインするまで何も表示しません。開き直すとログインからやり直し（クラウドへの接続は残ります）
+  - 更新のしかた：`bash tool/build_admin_web.sh`（Flutter で Web 用にビルドして、リポジトリ直下の `kanri/` に置く）→ コミット・プッシュ
 
 ## 試験用 apk の入れかた（Android）
 1. apk ファイルを Android のスマートフォン・タブレットに送る（Google ドライブ・メールなど）
@@ -59,13 +70,16 @@ lib/main.dart            起動・テーマ
 lib/core/calc.dart       金額計算・集計・検索（Web版 js/calc.js と同じ）
 lib/core/profit.dart     売上と利益（Web版 js/profit.js と同じ）
 lib/core/auth.dart       管理者のID・パスワード（PBKDF2）
-lib/core/store.dart      保存（SQLite）
+lib/core/store.dart      保存の窓口（SQLite／ブラウザは IndexedDB：backend_io.dart・backend_web.dart）
+lib/core/sync.dart       クラウド同期（Web版 js/sync.js と同じ形式）
 lib/core/app_state.dart  アプリの状態（カート・保留・会計・管理者）
 lib/core/receipt.dart    レシートの中身
 lib/core/reservation.dart 予約（仕込み集計・お客様の呼び出し）
 lib/core/fax_pdf.dart    FAXの書類（ご予約確認書・FAX注文用紙）
 lib/core/sound.dart      操作音（assets/sounds。tool/gen_sounds.py で合成）
-lib/ui/                  画面（shell・register・reservations・sales・admin・common）
+lib/ui/                  画面（shell・register・reservations・sales・admin・sync_settings・common）
+tool/build_admin_web.sh  管理画面（Web）をビルドして ../kanri/ に置く
+test/sync_test.dart      同期のテスト（../tools/mock-firebase.js：Firebase を真似たテスト用サーバーを使う）
 assets/fonts/ipag.ttf    FAXの書類の文字（IPAゴシック。IPAフォントライセンスv1.0、assets/fonts/IPA_Font_License.txt）
 test/                    テスト（Web版との照合・画面の動き）
 ```

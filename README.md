@@ -59,7 +59,10 @@
 
 ### 公開方法（例：GitHub Pages）
 
-このリポジトリの場合の公開先：**https://tsujita813.github.io/NIKUPOS/**、管理画面は **https://tsujita813.github.io/NIKUPOS/admin.html**。
+このリポジトリの場合の公開先：
+- Web版のレジ：**https://tsujita813.github.io/NIKUPOS/**（Web版の管理画面は `…/admin.html`）
+- **管理画面（Androidアプリと共通・Flutter版）：https://tsujita813.github.io/NIKUPOS/kanri/**（クラウド同期でつないだお店のデータを、パソコンなどのブラウザで見る・変える）
+
 1. GitHub の無料プランでは、Pages は公開（Public）リポジトリでしか使えません。Settings → General → 一番下の Danger Zone →「Change repository visibility」で Public にする
 2. Settings → Pages で、Source に「Deploy from a branch」、Branch に `ccr-9330c02e-6mr9hb`、フォルダに `/ (root)` を選んで Save
 3. 数分後、上のアドレスで開けます（Settings → Pages の上部にもアドレスが出ます）
@@ -274,6 +277,7 @@ npm run mock-firebase   # 同期の動作確認用の、Firebaseを真似たテ�
 ## 複数の端末で使う（クラウド同期）
 
 店頭のレジ（例：iPad）と卸用の端末（例：スマホ）など、複数の端末で商品・売上・予約・卸・在庫を共有できます。
+**Web版・Androidアプリ（Flutter版）・管理画面（…/kanri/）は同じしくみ・同じ保存形式で同期する**ので、同じお店のアカウントでつなげば、どれで入れたデータも共有されます（管理者のID・パスワードも共通）。
 データの置き場所には Google の **Firebase（Cloud Firestore）** を使います。町のお店1軒分の量なら**無料プラン（Spark）**の範囲で使えます。
 
 ### 準備（最初に1回だけ・15分ほど）

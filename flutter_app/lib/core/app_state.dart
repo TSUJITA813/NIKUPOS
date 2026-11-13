@@ -9,6 +9,7 @@ import 'calc.dart';
 import 'reservation.dart';
 import 'sound.dart';
 import 'store.dart';
+import 'sync.dart';
 
 /// 画面のレイアウト（端末ごとに選べる）。auto は画面の大きさで自動
 enum LayoutMode { auto, phone, tablet }
@@ -381,7 +382,7 @@ class AppState extends ChangeNotifier {
       p['order'] = products.length;
       products.add(p);
     }
-    await store.saveProducts();
+    await store.saveProducts([p['id'] as String]);
     log('product', '商品を保存：${p['name']}');
     notifyListeners();
   }
@@ -389,7 +390,7 @@ class AppState extends ChangeNotifier {
   Future<void> deleteProduct(String id) async {
     final p = products.firstWhere((x) => x['id'] == id);
     products.removeWhere((x) => x['id'] == id);
-    await store.saveProducts();
+    await store.saveProducts([id]);
     log('product', '商品を削除：${p['name']}');
     notifyListeners();
   }
@@ -397,6 +398,20 @@ class AppState extends ChangeNotifier {
   Future<void> saveSettings() async {
     await store.saveSettings();
     notifyListeners();
+  }
+
+  // ---------------- クラウド同期 ----------------
+  /// クラウド同期（main で用意する。テストでは使わないこともある）
+  CloudSync? sync;
+
+  /// 別の端末からの変更が届いたとき・同期の状態が変わったとき
+  void remoteChanged() => notifyListeners();
+
+  /// クラウド同期を用意する（起動時）
+  void attachSync(CloudSync Function(AppState s) make) {
+    sync = make(this);
+    sync!.load();
+    sync!.start();
   }
 
   // ---------------- 操作ログ ----------------
@@ -447,6 +462,12 @@ class AppState extends ChangeNotifier {
     final code = newRecoveryCode();
     settings['admins'] = [acc];
     settings['adminRecovery'] = await makeRecovery(code);
+    // まだクラウドにつないでいない端末：あとでつないだとき、お店の管理者がいればそちらを使う
+    if (sync == null || !sync!.enabled) {
+      settings['adminsLocal'] = true;
+    } else {
+      settings.remove('adminsLocal');
+    }
     await saveSettings();
     adminId = acc['id'] as String;
     touch();
