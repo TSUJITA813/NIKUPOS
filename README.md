@@ -3,6 +3,8 @@
 町の鶏肉屋さんの店頭販売向けの、シンプルなPOSレジです。
 **iPad / iPhone / Androidタブレット / Androidスマホ** のブラウザで動き、ホーム画面に追加するとアプリとして使えます。インターネットが切れていても動きます。
 
+> **Flutter版（Androidアプリ）を作成中です**：`flutter_app/` フォルダ。くわしくは `flutter_app/README.md`。
+
 ## できること
 
 | 機能 | 内容 |
